@@ -1,0 +1,12 @@
+groups:
+  - name: test-alert
+    rules:
+      - alert: TestAlertAlwaysFiring
+        expr: vector(1)
+        for: 30s
+        labels:
+          severity: warning
+          team: devops
+        annotations:
+          summary: "Test alert always firing"
+          description: "This alert is used for testing the Alertmanager webhook integration."

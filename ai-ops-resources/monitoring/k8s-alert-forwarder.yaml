@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-forwarder
+  namespace: monitoring
+  labels:
+    app: alert-forwarder
+    component: alerting
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alert-forwarder
+  template:
+    metadata:
+      labels:
+        app: alert-forwarder
+        component: alerting
+    spec:
+      containers:
+      - name: alert-forwarder
+        image: chungpq16/alert-forwarder:1.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        env:
+        - name: RABBITMQ_URL
+          value: "amqp://guest:guest@host.docker.internal:5672/"
+        - name: QUEUE_NAME
+          value: "test-queue"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-forwarder
+  namespace: monitoring
+  labels:
+    app: alert-forwarder
+    component: alerting
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: alert-forwarder
