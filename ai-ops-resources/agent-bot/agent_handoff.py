@@ -498,7 +498,7 @@ async def send_teams_notification(
     
     theme_color = severity_colors.get(severity.lower(), "0078d4")
     
-    # Create adaptive card message for Teams - using simpler format
+    # Create adaptive card message for Teams - keep colons like Action Agent
     teams_message = {
         "@type": "MessageCard",
         "@context": "https://schema.org/extensions",
