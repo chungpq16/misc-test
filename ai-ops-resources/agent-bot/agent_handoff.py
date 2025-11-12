@@ -498,7 +498,7 @@ async def send_teams_notification(
     
     theme_color = severity_colors.get(severity.lower(), "0078d4")
     
-    # Create adaptive card message for Teams (same format as Action Agent)
+    # Create adaptive card message for Teams - using simpler format
     teams_message = {
         "@type": "MessageCard",
         "@context": "https://schema.org/extensions",
@@ -510,11 +510,11 @@ async def send_teams_notification(
                 "activitySubtitle": "AI-Ops Communicator Agent - Kubernetes Expert Analysis",
                 "facts": [
                     {
-                        "name": "Severity",
+                        "name": "Severity:",
                         "value": severity.upper()
                     },
                     {
-                        "name": "Summary",
+                        "name": "Summary:",
                         "value": summary
                     }
                 ],
@@ -522,18 +522,15 @@ async def send_teams_notification(
             },
             {
                 "activityTitle": "🔍 Root Cause Analysis",
-                "text": root_cause,
-                "markdown": True
+                "text": root_cause
             },
             {
                 "activityTitle": "⚡ Immediate Actions Required",
-                "text": "\n\n".join([f"{i+1}. {action}" for i, action in enumerate(immediate_actions)]),
-                "markdown": True
+                "text": "\n".join([f"{i+1}. {action}" for i, action in enumerate(immediate_actions)])
             },
             {
                 "activityTitle": "🎯 Efficiency Improvements & Long-term Solutions",
-                "text": "\n\n".join([f"• {improvement}" for improvement in efficiency_improvements]),
-                "markdown": True
+                "text": "\n".join([f"• {improvement}" for improvement in efficiency_improvements])
             }
         ]
     }
