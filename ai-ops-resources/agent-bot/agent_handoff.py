@@ -423,7 +423,7 @@ async def send_teams_notification(
     """
     print(f"📢 [ACTION AGENT] Sending Teams notification: {title}")
     
-    # Create adaptive card message for Teams
+    # Create adaptive card message for Teams (same format as Communicator Agent)
     teams_message = {
         "@type": "MessageCard",
         "@context": "https://schema.org/extensions",
@@ -435,15 +435,15 @@ async def send_teams_notification(
                 "activitySubtitle": "AI-Ops Action Agent - Automated Remediation",
                 "facts": [
                     {
-                        "name": "Issue Summary:",
+                        "name": "Issue Summary",
                         "value": issue_summary
                     },
                     {
-                        "name": "Before State:",
+                        "name": "Before State",
                         "value": before_state
                     },
                     {
-                        "name": "After State:",
+                        "name": "After State",
                         "value": after_state
                     }
                 ],
@@ -451,11 +451,13 @@ async def send_teams_notification(
             },
             {
                 "activityTitle": "🔧 Actions Taken",
-                "text": "\n".join([f"- {action}" for action in actions_taken])
+                "text": "\n\n".join([f"- {action}" for action in actions_taken]),
+                "markdown": True
             },
             {
                 "activityTitle": "✓ Verification Steps",
-                "text": "\n".join([f"- {step}" for step in verification_steps])
+                "text": "\n\n".join([f"- {step}" for step in verification_steps]),
+                "markdown": True
             }
         ]
     }
