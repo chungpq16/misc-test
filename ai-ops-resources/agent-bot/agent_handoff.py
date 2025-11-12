@@ -490,7 +490,7 @@ async def send_teams_notification(
     
     theme_color = severity_colors.get(severity.lower(), "0078d4")
     
-    # Create adaptive card message for Teams
+    # Create adaptive card message for Teams (same format as Action Agent)
     teams_message = {
         "@type": "MessageCard",
         "@context": "https://schema.org/extensions",
@@ -502,11 +502,11 @@ async def send_teams_notification(
                 "activitySubtitle": "AI-Ops Communicator Agent - Kubernetes Expert Analysis",
                 "facts": [
                     {
-                        "name": "Severity:",
+                        "name": "Severity",
                         "value": severity.upper()
                     },
                     {
-                        "name": "Summary:",
+                        "name": "Summary",
                         "value": summary
                     }
                 ],
@@ -514,27 +514,18 @@ async def send_teams_notification(
             },
             {
                 "activityTitle": "🔍 Root Cause Analysis",
-                "text": root_cause
+                "text": root_cause,
+                "markdown": True
             },
             {
                 "activityTitle": "⚡ Immediate Actions Required",
-                "text": "\n".join([f"{i+1}. {action}" for i, action in enumerate(immediate_actions)])
+                "text": "\n\n".join([f"{i+1}. {action}" for i, action in enumerate(immediate_actions)]),
+                "markdown": True
             },
             {
                 "activityTitle": "🎯 Efficiency Improvements & Long-term Solutions",
-                "text": "\n".join([f"• {improvement}" for improvement in efficiency_improvements])
-            }
-        ],
-        "potentialAction": [
-            {
-                "@type": "OpenUri",
-                "name": "View Kubernetes Dashboard",
-                "targets": [
-                    {
-                        "os": "default",
-                        "uri": "https://kubernetes.io/docs/tasks/debug/"
-                    }
-                ]
+                "text": "\n\n".join([f"• {improvement}" for improvement in efficiency_improvements]),
+                "markdown": True
             }
         ]
     }
