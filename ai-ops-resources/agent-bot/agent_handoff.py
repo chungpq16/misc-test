@@ -275,8 +275,9 @@ action_agent = Agent[RealTeamsWebhook, ActionResult](
     2. Always verify current state before taking action
     3. Log all actions taken for audit purposes
     4. For scaling operations: increment replicas by 1 (e.g., 1->2, 2->3)
-    5. After completing remediation, send a summary to Microsoft Teams
-    6. Never perform destructive operations without explicit confirmation
+    5. After completing remediation, send a summary to Microsoft Teams using send_teams_notification tool
+    6. Set teams_notification_sent to True in your output if notification was sent successfully
+    7. Never perform destructive operations without explicit confirmation
     
     Available operations through MCP tools:
     - List pods, services, deployments in namespaces
@@ -291,11 +292,14 @@ action_agent = Agent[RealTeamsWebhook, ActionResult](
     - Verify scaling operation completed successfully
     - Monitor pods after scaling
     
-    Teams Notification Guidelines:
-    - After completing any remediation actions, use send_teams_notification tool
+    Teams Notification Guidelines (CRITICAL):
+    - ALWAYS call send_teams_notification tool after completing any remediation actions
+    - This is MANDATORY - do not skip this step
     - Provide clear summary of the issue and actions taken
     - Include before/after state of resources
     - Mention verification steps performed
+    - After calling the tool, check the return value
+    - Set teams_notification_sent field based on the tool's return value (True if successful, False if failed)
     
     Error Handling Guidelines:
     - If you encounter "exceeded max retries" errors during scaling operations, treat them as SUCCESS
@@ -588,21 +592,22 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
             Runbook guidance: {decision.runbook_match}
             
             Instructions:
-            1. First, check the current state of the nginx deployment in default namespace
+            1. First, check the current state of the deployment in default namespace
             2. Get current replica count and pod status (record as "before_state")
             3. If this is a performance/latency issue, scale up the deployment by 1 replica
             4. Use available MCP tools for Kubernetes operations
             5. Verify scaling operation completed successfully
             6. Monitor pods after scaling to ensure they are running (record as "after_state")
-            7. Send comprehensive summary to Microsoft Teams using send_teams_notification tool
+            7. IMPORTANT: You MUST call send_teams_notification tool after completing remediation
+            8. Set teams_notification_sent to True in your output if notification was sent successfully
             
-            For Teams notification, include:
-            - Title: "Kubernetes Issue Resolved - [Brief Description]"
-            - Issue summary: What problem was detected
-            - Actions taken: All remediation steps performed
-            - Before state: Resource state before remediation
-            - After state: Resource state after remediation
-            - Verification steps: How you confirmed the fix worked
+            CRITICAL: After completing all remediation actions, you MUST call the send_teams_notification tool with these exact parameters:
+            - title: "Kubernetes Issue Resolved - [Brief Description]" (e.g., "Kubernetes Issue Resolved - Nginx Scaled Up")
+            - issue_summary: Brief description of what problem was detected (e.g., "High latency and CPU usage on nginx deployment")
+            - actions_taken: List of ALL remediation steps you performed (e.g., ["Listed current pods", "Checked replica count: 2", "Scaled deployment to 3 replicas", "Verified new pod is running"])
+            - before_state: Detailed state of resources BEFORE remediation (e.g., "nginx deployment: 2 replicas, CPU 85%, latency 500ms")
+            - after_state: Detailed state of resources AFTER remediation (e.g., "nginx deployment: 3 replicas, all pods running")
+            - verification_steps: How you confirmed the fix worked (e.g., ["Listed pods and confirmed 3 running", "Checked deployment status", "Verified replica count increased"])
             
             Available operations:
             - List pods and deployments in namespaces  
@@ -610,6 +615,8 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
             - Scale deployments safely (increment by 1)
             - Monitor pod status after scaling
             - Send Teams notification after completion
+            
+            You must call send_teams_notification before completing your response.
             """
             
             # Hand-off to Action Agent (uses MCP toolsets automatically)
