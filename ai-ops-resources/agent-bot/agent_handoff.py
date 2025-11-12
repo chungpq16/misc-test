@@ -33,6 +33,9 @@ LLM_FARM_URL = os.getenv("LLM_FARM_URL", "https://aoai-farm.bosch-temp.com/api/o
 LLM_FARM_API_KEY = os.getenv("LLM_FARM_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+# Teams Webhook Configuration
+TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK_URL", "")
+
 # === Data Models ===
 
 class AlertDecision(BaseModel):
@@ -48,13 +51,16 @@ class ActionResult(BaseModel):
     actions_taken: list[str]
     kubernetes_output: str | None = None
     error_message: str | None = None
+    teams_notification_sent: bool = False
 
 class EscalationReport(BaseModel):
     """Report from communicator agent."""
     summary: str
     root_cause_analysis: str
     recommended_actions: list[str]
+    efficiency_improvements: list[str] = Field(description="Long-term efficiency improvements and optimizations")
     severity: Literal["low", "medium", "high", "critical"]
+    teams_notification_sent: bool = False
 
 
 # === Hardcoded Runbook Knowledge Base ===
@@ -150,6 +156,47 @@ class MockTeamsWebhook:
         return True
 
 
+class RealTeamsWebhook:
+    """Real Microsoft Teams webhook implementation."""
+    
+    def __init__(self, webhook_url: str):
+        self.webhook_url = webhook_url
+    
+    async def send_message(self, message: dict) -> bool:
+        """Send message to Microsoft Teams via webhook."""
+        if not self.webhook_url:
+            print("⚠️  [TEAMS] No webhook URL configured, skipping notification")
+            return False
+        
+        try:
+            import httpx
+            
+            print(f"📢 [TEAMS] Sending notification to Teams...")
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.webhook_url,
+                    json=message,
+                    timeout=10.0
+                )
+                
+                if response.status_code == 200:
+                    print("✅ [TEAMS] Notification sent successfully")
+                    return True
+                else:
+                    print(f"❌ [TEAMS] Failed to send notification: {response.status_code}")
+                    return False
+                    
+        except ImportError:
+            print("⚠️  [TEAMS] httpx not installed. Install with: pip install httpx")
+            print("📢 [TEAMS NOTIFICATION (Mock)]")
+            print(json.dumps(message, indent=2))
+            return False
+        except Exception as e:
+            print(f"❌ [TEAMS] Error sending notification: {e}")
+            return False
+
+
 # === Load Kubernetes MCP Servers ===
 
 def load_kubernetes_mcp_servers():
@@ -193,9 +240,9 @@ orchestrator_agent = Agent[MockVectorDB, AlertDecision](
     """)
 
 # 2. Action Agent - Executes Kubernetes operations via MCP
-action_agent = Agent[None, ActionResult](
+action_agent = Agent[RealTeamsWebhook, ActionResult](
     model,  # Use configured model (LLM Farm or OpenAI)
-    deps_type=None,  # No custom dependencies, uses MCP toolsets
+    deps_type=RealTeamsWebhook,  # Now has Teams webhook access
     output_type=ActionResult,
     toolsets=kubernetes_mcp_servers,  # Real Kubernetes MCP servers
     system_prompt="""
@@ -206,7 +253,8 @@ action_agent = Agent[None, ActionResult](
     2. Always verify current state before taking action
     3. Log all actions taken for audit purposes
     4. For scaling operations: increment replicas by 1 (e.g., 1->2, 2->3)
-    5. Never perform destructive operations without explicit confirmation
+    5. After completing remediation, send a summary to Microsoft Teams
+    6. Never perform destructive operations without explicit confirmation
     
     Available operations through MCP tools:
     - List pods, services, deployments in namespaces
@@ -220,6 +268,12 @@ action_agent = Agent[None, ActionResult](
     - Increment by exactly 1 replica for safety
     - Verify scaling operation completed successfully
     - Monitor pods after scaling
+    
+    Teams Notification Guidelines:
+    - After completing any remediation actions, use send_teams_notification tool
+    - Provide clear summary of the issue and actions taken
+    - Include before/after state of resources
+    - Mention verification steps performed
     
     Error Handling Guidelines:
     - If you encounter "exceeded max retries" errors during scaling operations, treat them as SUCCESS
@@ -235,24 +289,59 @@ action_agent = Agent[None, ActionResult](
     """)
 
 # 3. Communicator Agent - Handles escalations and notifications
-communicator_agent = Agent[MockTeamsWebhook, EscalationReport](
+communicator_agent = Agent[RealTeamsWebhook, EscalationReport](
     model,  # Use configured model (LLM Farm or OpenAI)
-    deps_type=MockTeamsWebhook, 
+    deps_type=RealTeamsWebhook,  # Now has Teams webhook access
     output_type=EscalationReport,
     system_prompt="""
-    You are an AI-Ops Communicator Agent for incident escalation.
+    You are an AI-Ops Communicator Agent and Kubernetes Expert for incident escalation and analysis.
     
     Your job is to:
-    1. Analyze incidents that cannot be automatically resolved
-    2. Provide clear root cause analysis
-    3. Recommend specific actions for human operators
-    4. Estimate severity and impact
+    1. Analyze incidents that cannot be automatically resolved with expert-level Kubernetes knowledge
+    2. Provide comprehensive root cause analysis based on Kubernetes best practices
+    3. Recommend specific, actionable solutions for immediate resolution
+    4. Suggest long-term efficiency improvements and optimizations
+    5. Send detailed analysis and recommendations to Microsoft Teams
+    6. Estimate severity and impact on system and users
     
-    Create clear, actionable reports that help operators quickly understand:
-    - What happened
-    - Why it happened (likely causes)
-    - What should be done next
-    - How urgent the issue is
+    Analysis Framework:
+    - Apply Kubernetes troubleshooting best practices
+    - Consider resource limits, quotas, and capacity planning
+    - Evaluate pod scheduling, node affinity, and workload distribution
+    - Assess network policies, service mesh configuration, and connectivity
+    - Review monitoring, logging, and observability setup
+    - Consider security policies and RBAC configurations
+    
+    Create comprehensive reports that include:
+    
+    **Summary**: Clear, concise description of the incident
+    
+    **Root Cause Analysis**: 
+    - Deep technical analysis of why the issue occurred
+    - Kubernetes-specific factors contributing to the problem
+    - Impact on cluster health and application performance
+    
+    **Immediate Actions** (recommended_actions):
+    - Step-by-step remediation procedures
+    - Specific kubectl commands or configuration changes needed
+    - Expected outcomes and verification steps
+    - Rollback procedures if needed
+    
+    **Efficiency Improvements** (efficiency_improvements):
+    - Long-term architectural improvements
+    - Resource optimization strategies (CPU, memory, storage)
+    - High availability and disaster recovery enhancements
+    - Monitoring and alerting improvements
+    - Automation opportunities
+    - Cost optimization recommendations
+    - Performance tuning suggestions
+    
+    **Severity Assessment**:
+    - Impact on users and business operations
+    - Urgency level for resolution
+    
+    Always send your analysis to Teams using the send_teams_notification tool.
+    Provide actionable, practical guidance that operators can implement immediately.
     """)
 
 
@@ -275,6 +364,166 @@ async def query_runbook_kb(ctx, alert_description: str) -> dict | None:
     return result
 
 
+# === Tools for Action Agent ===
+
+@action_agent.tool
+async def send_teams_notification(
+    ctx,
+    title: str,
+    issue_summary: str,
+    actions_taken: list[str],
+    before_state: str,
+    after_state: str,
+    verification_steps: list[str]
+) -> bool:
+    """
+    Send remediation summary to Microsoft Teams after resolving issues.
+    
+    Args:
+        title: Title of the notification (e.g., "Kubernetes Issue Resolved")
+        issue_summary: Brief description of the issue that was detected
+        actions_taken: List of actions performed to resolve the issue
+        before_state: State of resources before remediation
+        after_state: State of resources after remediation
+        verification_steps: Steps taken to verify the fix
+        
+    Returns:
+        bool: True if notification was sent successfully
+    """
+    print(f"📢 [ACTION AGENT] Sending Teams notification: {title}")
+    
+    # Create adaptive card message for Teams
+    teams_message = {
+        "@type": "MessageCard",
+        "@context": "https://schema.org/extensions",
+        "themeColor": "28a745",  # Green for success
+        "summary": title,
+        "sections": [
+            {
+                "activityTitle": "✅ " + title,
+                "activitySubtitle": "AI-Ops Action Agent - Automated Remediation",
+                "facts": [
+                    {
+                        "name": "Issue Summary:",
+                        "value": issue_summary
+                    },
+                    {
+                        "name": "Before State:",
+                        "value": before_state
+                    },
+                    {
+                        "name": "After State:",
+                        "value": after_state
+                    }
+                ],
+                "markdown": True
+            },
+            {
+                "activityTitle": "🔧 Actions Taken",
+                "text": "\n".join([f"- {action}" for action in actions_taken])
+            },
+            {
+                "activityTitle": "✓ Verification Steps",
+                "text": "\n".join([f"- {step}" for step in verification_steps])
+            }
+        ]
+    }
+    
+    success = await ctx.deps.send_message(teams_message)
+    return success
+
+
+# === Tools for Communicator Agent ===
+
+@communicator_agent.tool
+async def send_teams_notification(
+    ctx,
+    title: str,
+    summary: str,
+    root_cause: str,
+    severity: str,
+    immediate_actions: list[str],
+    efficiency_improvements: list[str]
+) -> bool:
+    """
+    Send comprehensive incident analysis and recommendations to Microsoft Teams.
+    
+    Args:
+        title: Title of the escalation (e.g., "Critical Kubernetes Incident Analysis")
+        summary: Executive summary of the incident
+        root_cause: Detailed root cause analysis
+        severity: Incident severity level (low, medium, high, critical)
+        immediate_actions: List of immediate remediation steps
+        efficiency_improvements: List of long-term optimization recommendations
+        
+    Returns:
+        bool: True if notification was sent successfully
+    """
+    print(f"📢 [COMMUNICATOR AGENT] Sending Teams notification: {title}")
+    
+    # Determine color based on severity
+    severity_colors = {
+        "low": "0078d4",      # Blue
+        "medium": "ffa500",   # Orange
+        "high": "ff6347",     # Red-Orange
+        "critical": "dc143c"  # Crimson
+    }
+    
+    theme_color = severity_colors.get(severity.lower(), "0078d4")
+    
+    # Create adaptive card message for Teams
+    teams_message = {
+        "@type": "MessageCard",
+        "@context": "https://schema.org/extensions",
+        "themeColor": theme_color,
+        "summary": title,
+        "sections": [
+            {
+                "activityTitle": "🚨 " + title,
+                "activitySubtitle": "AI-Ops Communicator Agent - Kubernetes Expert Analysis",
+                "facts": [
+                    {
+                        "name": "Severity:",
+                        "value": severity.upper()
+                    },
+                    {
+                        "name": "Summary:",
+                        "value": summary
+                    }
+                ],
+                "markdown": True
+            },
+            {
+                "activityTitle": "🔍 Root Cause Analysis",
+                "text": root_cause
+            },
+            {
+                "activityTitle": "⚡ Immediate Actions Required",
+                "text": "\n".join([f"{i+1}. {action}" for i, action in enumerate(immediate_actions)])
+            },
+            {
+                "activityTitle": "🎯 Efficiency Improvements & Long-term Solutions",
+                "text": "\n".join([f"• {improvement}" for improvement in efficiency_improvements])
+            }
+        ],
+        "potentialAction": [
+            {
+                "@type": "OpenUri",
+                "name": "View Kubernetes Dashboard",
+                "targets": [
+                    {
+                        "os": "default",
+                        "uri": "https://kubernetes.io/docs/tasks/debug/"
+                    }
+                ]
+            }
+        ]
+    }
+    
+    success = await ctx.deps.send_message(teams_message)
+    return success
+
+
 # === Main Application Logic (Programmatic Hand-off) ===
 
 async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
@@ -289,11 +538,12 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
     
     # Dependencies
     vector_db = MockVectorDB()
-    teams_webhook = MockTeamsWebhook()
+    teams_webhook = RealTeamsWebhook(TEAMS_WEBHOOK_URL)
     
     # Check if Kubernetes MCP servers are available
     mcp_available = len(kubernetes_mcp_servers) > 0
     print(f"🔌 [MCP STATUS] Kubernetes MCP servers available: {mcp_available}")
+    print(f"📢 [TEAMS STATUS] Webhook configured: {bool(TEAMS_WEBHOOK_URL)}")
     
     try:
         # Step 1: Orchestrator analyzes the alert
@@ -321,24 +571,34 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
             
             Instructions:
             1. First, check the current state of the nginx deployment in default namespace
-            2. Get current replica count and pod status
+            2. Get current replica count and pod status (record as "before_state")
             3. If this is a performance/latency issue, scale up the deployment by 1 replica
             4. Use available MCP tools for Kubernetes operations
             5. Verify scaling operation completed successfully
-            6. Monitor pods after scaling to ensure they are running
-            7. Provide detailed feedback on actions taken
+            6. Monitor pods after scaling to ensure they are running (record as "after_state")
+            7. Send comprehensive summary to Microsoft Teams using send_teams_notification tool
+            
+            For Teams notification, include:
+            - Title: "Kubernetes Issue Resolved - [Brief Description]"
+            - Issue summary: What problem was detected
+            - Actions taken: All remediation steps performed
+            - Before state: Resource state before remediation
+            - After state: Resource state after remediation
+            - Verification steps: How you confirmed the fix worked
             
             Available operations:
             - List pods and deployments in namespaces  
             - Get current replica count
             - Scale deployments safely (increment by 1)
             - Monitor pod status after scaling
+            - Send Teams notification after completion
             """
             
             # Hand-off to Action Agent (uses MCP toolsets automatically)
             try:
                 action_result = await action_agent.run(
                     action_prompt,
+                    deps=teams_webhook,
                     usage=shared_usage
                 )
                 result = action_result.output
@@ -354,7 +614,8 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
                             "Scaling should be successful despite infrastructure error"
                         ],
                         kubernetes_output="Scaling operation attempted - MCP infrastructure error but kubectl command was sent to cluster",
-                        error_message=None
+                        error_message=None,
+                        teams_notification_sent=False
                     )
                     print("✅ [FRAMEWORK] Converted MCP retry error to successful scaling result")
                 else:
@@ -364,6 +625,7 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
             print(f"📝 [ACTION RESULT] Actions taken: {result.actions_taken}")
             if result.kubernetes_output:
                 print(f"🔍 [K8S OUTPUT] {result.kubernetes_output}")
+            print(f"📢 [ACTION RESULT] Teams notification sent: {result.teams_notification_sent}")
             
             return {
                 "status": "handled",
@@ -377,9 +639,48 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
             print("\n📢 [STEP 2] Handing off to Communicator Agent...")
             
             # Hand-off to Communicator Agent  
+            escalation_prompt = f"""
+            Analyze this complex Kubernetes incident as an expert and create comprehensive report: {alert_message}
+            
+            Orchestrator's initial analysis: {decision.reasoning}
+            
+            Your expert analysis should include:
+            
+            1. **Root Cause Analysis**: 
+               - Deep technical analysis using Kubernetes expertise
+               - Why this issue occurred from infrastructure perspective
+               - What Kubernetes components or configurations are involved
+            
+            2. **Immediate Actions**:
+               - Step-by-step remediation procedures
+               - Specific kubectl commands operators should run
+               - Expected outcomes and how to verify success
+               - Rollback procedures if needed
+            
+            3. **Efficiency Improvements**:
+               - Resource optimization (CPU, memory, replicas)
+               - High availability improvements
+               - Monitoring and alerting enhancements
+               - Automation opportunities
+               - Cost optimization recommendations
+               - Performance tuning suggestions
+               - Architecture improvements for long-term stability
+            
+            4. **Severity Assessment**:
+               - Impact on users and business
+               - Urgency for resolution
+            
+            After completing your analysis, send it to Microsoft Teams using send_teams_notification tool with:
+            - Title: "Critical Kubernetes Incident Analysis - [Issue Type]"
+            - Summary: Executive summary
+            - Root cause: Your detailed analysis
+            - Severity: Assessed severity level
+            - Immediate actions: List of remediation steps
+            - Efficiency improvements: List of optimization recommendations
+            """
+            
             escalation_result = await communicator_agent.run(
-                f"Create escalation report for this incident: {alert_message}. "
-                f"Orchestrator analysis: {decision.reasoning}",
+                escalation_prompt,
                 deps=teams_webhook,
                 usage=shared_usage
             )
@@ -387,19 +688,9 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
             report = escalation_result.output
             print(f"📊 [ESCALATION] Severity: {report.severity}")
             print(f"📊 [ESCALATION] Summary: {report.summary}")
-            
-            # Send to Teams
-            teams_message = {
-                "title": "🚨 Kubernetes Incident Escalation",
-                "severity": report.severity,
-                "summary": report.summary,
-                "root_cause": report.root_cause_analysis,
-                "recommendations": report.recommended_actions,
-                "alert": alert_message,
-                "mcp_status": "available" if mcp_available else "fallback"
-            }
-            
-            await teams_webhook.send_message(teams_message)
+            print(f"📊 [ESCALATION] Recommended actions: {len(report.recommended_actions)}")
+            print(f"📊 [ESCALATION] Efficiency improvements: {len(report.efficiency_improvements)}")
+            print(f"📢 [ESCALATION] Teams notification sent: {report.teams_notification_sent}")
             
             return {
                 "status": "escalated", 
@@ -461,57 +752,6 @@ async def demo_scenario_2():
     return result
 
 
-async def demo_scenario_3():
-    """
-    Scenario 3: Direct MCP test - Action agent listing kube-system pods
-    """
-    print("\n" + "="*80)
-    print("🧪 DEMO SCENARIO 3: Direct Kubernetes MCP Test")
-    print("="*80)
-    
-    if kubernetes_mcp_servers:
-        print("🔌 MCP servers available - testing direct Kubernetes operations...")
-        
-        # Direct action agent test
-        test_prompt = """
-        Test Kubernetes MCP integration by listing all pods in the kube-system namespace.
-        
-        Instructions:
-        1. Use available MCP tools to list pods in kube-system namespace
-        2. Show pod status, names, and readiness
-        3. Report any issues found
-        4. Provide summary of system health based on pod status
-        """
-        
-        usage = RunUsage()
-        try:
-            result = await action_agent.run(test_prompt, usage=usage)
-            
-            print(f"✅ [MCP TEST] Success: {result.output.success}")
-            print(f"📝 [MCP TEST] Actions: {result.output.actions_taken}")
-            if result.output.kubernetes_output:
-                print(f"🔍 [K8S OUTPUT] {result.output.kubernetes_output}")
-            
-            return {
-                "status": "mcp_test_completed",
-                "result": result.output,
-                "usage": usage
-            }
-            
-        except Exception as e:
-            print(f"❌ [MCP TEST ERROR] {e}")
-            return {
-                "status": "mcp_test_failed", 
-                "error": str(e),
-                "usage": usage
-            }
-    else:
-        print("⚠️  No MCP servers available - using fallback mock implementation")
-        return {
-            "status": "mcp_not_available",
-            "fallback_used": True
-        }
-
 
 async def main():
     """
@@ -526,16 +766,14 @@ async def main():
     
     # Run all scenarios
     scenario1_result = await demo_scenario_1()
-    # scenario2_result = await demo_scenario_2() 
-    # scenario3_result = await demo_scenario_3()
+    scenario2_result = await demo_scenario_2() 
     
     # Summary
     print("\n" + "="*80)
     print("📈 DEMO SUMMARY")
     print("="*80)
     print(f"Scenario 1 (Pod Issue + MCP): {scenario1_result['status']}")
-    # print(f"Scenario 2 (Complex Analysis): {scenario2_result['status']}")
-    # print(f"Scenario 3 (Direct MCP Test): {scenario3_result['status']}")
+    print(f"Scenario 2 (Complex Analysis): {scenario2_result['status']}")
     print(f"\n🔌 MCP Integration: {'Active' if kubernetes_mcp_servers else 'Fallback Mode'}")
     print("\n✅ Demo completed! All scenarios tested with Kubernetes MCP integration.")
     
