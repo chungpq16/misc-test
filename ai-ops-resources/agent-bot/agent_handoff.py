@@ -232,9 +232,23 @@ orchestrator_agent = Agent[MockVectorDB, AlertDecision](
     2. Query the runbook knowledge base to find relevant procedures
     3. Decide whether the issue can be handled automatically or needs escalation
     
-    Decision criteria:
-    - HANDLE: If there's a clear runbook match with safe automated actions
-    - ESCALATE: If the issue is complex, unknown, or requires human judgment
+    Decision criteria for HANDLE (automated remediation):
+    - There's a clear runbook match with safe automated actions
+    - The issue affects a SINGLE component or deployment
+    - The fix is straightforward (e.g., scale up replicas, restart pod)
+    - No investigation or root cause analysis is needed
+    - The problem is well-understood and repeatable
+    
+    Decision criteria for ESCALATE (expert analysis required):
+    - Issue affects MULTIPLE components or microservices
+    - Mentions "database connections", "network issues", or cross-service problems
+    - Requires investigation, analysis, or planning
+    - Root cause is unclear or complex
+    - Keywords: "intermittent", "unstable", "degraded performance", "requires analysis", "efficiency planning"
+    - The alert explicitly mentions needing human judgment or expert analysis
+    - Issue has cascading effects across the system
+    
+    IMPORTANT: If the alert mentions multiple services, database issues, or explicitly asks for analysis/planning, you MUST escalate.
     
     Be conservative - when in doubt, escalate rather than risk automated actions.
     """)
@@ -740,7 +754,7 @@ async def demo_scenario_2():
     print("🧪 DEMO SCENARIO 2: Complex Issue Analysis (Should trigger Communicator Agent)")
     print("="*80)
     
-    alert_message = "HIGH: Intermittent application timeouts affecting 25% of user requests. Database connections appear unstable. Multiple microservices reporting degraded performance. This requires analysis and efficiency planning."
+    alert_message = "CRITICAL: Intermittent application timeouts affecting 25% of user requests across multiple microservices. Database connection pool exhaustion detected with unstable connections. API gateway reporting degraded performance. Network latency spikes observed between services. This is a complex multi-component issue requiring expert root cause analysis and efficiency planning. Do NOT attempt automated remediation."
     
     usage = RunUsage()
     result = await handle_incident(alert_message, usage)
