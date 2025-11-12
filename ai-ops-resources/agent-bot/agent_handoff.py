@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 from typing import Literal
+import aio_pika
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunUsage
 from pydantic_ai.mcp import load_mcp_servers
@@ -35,6 +36,13 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Teams Webhook Configuration
 TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK_URL", "")
+
+# RabbitMQ Configuration
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
+RABBITMQ_PORT = int(os.getenv("RABBITMQ_PORT", "5672"))
+RABBITMQ_USER = os.getenv("RABBITMQ_USER", "guest")
+RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
+RABBITMQ_QUEUE = os.getenv("RABBITMQ_QUEUE", "alert-queue")
 
 # === Data Models ===
 
@@ -735,76 +743,109 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
         }
 
 
-# === Demo Scenarios ===
+# === RabbitMQ Consumer ===
 
-async def demo_scenario_1():
+async def process_alert_message(message: aio_pika.IncomingMessage):
     """
-    Scenario 1: Performance issue that should trigger scaling by Action Agent
+    Process alert message from RabbitMQ queue.
+    
+    Args:
+        message: Incoming RabbitMQ message containing alert
     """
-    print("\n" + "="*80)
-    print("🧪 DEMO SCENARIO 1: Nginx Performance Issue - Scale Up Required (Should trigger Action Agent)")
-    print("="*80)
-    
-    alert_message = "HIGH: Nginx deployment in default namespace experiencing high latency (500ms avg response time). CPU usage at 85% and increasing. Current replica count appears insufficient for traffic load. Scale up required to handle overload."
-    
-    usage = RunUsage()
-    result = await handle_incident(alert_message, usage)
-    
-    print(f"\n📊 [FINAL RESULT] Status: {result['status']}")
-    print(f"📊 [FINAL RESULT] MCP Used: {result.get('mcp_used', False)}")
-    print(f"📊 [FINAL RESULT] Total Usage: {result['total_usage']}")
-    
-    return result
+    async with message.process():
+        try:
+            # Decode message body
+            alert_data = message.body.decode()
+            print(f"\n📨 [RABBITMQ] Received alert from queue: {RABBITMQ_QUEUE}")
+            print(f"📨 [RABBITMQ] Message: {alert_data[:100]}..." if len(alert_data) > 100 else f"📨 [RABBITMQ] Message: {alert_data}")
+            
+            # Try to parse as JSON, fallback to plain text
+            try:
+                alert_json = json.loads(alert_data)
+                # Extract alert message from JSON (adjust key based on your message format)
+                alert_message = alert_json.get("message", "") or alert_json.get("alert", "") or alert_json.get("description", "") or alert_data
+            except json.JSONDecodeError:
+                # If not JSON, use raw message
+                alert_message = alert_data
+            
+            # Process the alert through the incident handler
+            usage = RunUsage()
+            result = await handle_incident(alert_message, usage)
+            
+            # Log the result
+            print(f"\n✅ [RABBITMQ] Alert processed successfully")
+            print(f"📊 [RESULT] Status: {result['status']}")
+            print(f"📊 [RESULT] MCP Used: {result.get('mcp_used', False)}")
+            print(f"📊 [RESULT] Total Usage: {result['total_usage']}")
+            
+        except Exception as e:
+            print(f"❌ [RABBITMQ] Error processing alert: {e}")
+            # Message will be requeued if processing fails
 
 
-async def demo_scenario_2():
+async def consume_alerts():
     """
-    Scenario 2: Complex issue that should be escalated to Communicator Agent
+    Connect to RabbitMQ and consume alerts from the queue.
     """
-    print("\n" + "="*80)
-    print("🧪 DEMO SCENARIO 2: Complex Issue Analysis (Should trigger Communicator Agent)")
-    print("="*80)
+    print("🐰 [RABBITMQ] Connecting to RabbitMQ...")
+    print(f"🐰 [RABBITMQ] Host: {RABBITMQ_HOST}:{RABBITMQ_PORT}")
+    print(f"🐰 [RABBITMQ] Queue: {RABBITMQ_QUEUE}")
     
-    alert_message = "CRITICAL: Intermittent application timeouts affecting 25% of user requests across multiple microservices. Database connection pool exhaustion detected with unstable connections. API gateway reporting degraded performance. Network latency spikes observed between services. This is a complex multi-component issue requiring expert root cause analysis and efficiency planning. Do NOT attempt automated remediation."
-    
-    usage = RunUsage()
-    result = await handle_incident(alert_message, usage)
-    
-    print(f"\n📊 [FINAL RESULT] Status: {result['status']}")
-    print(f"📊 [FINAL RESULT] MCP Used: {result.get('mcp_used', False)}")
-    print(f"📊 [FINAL RESULT] Total Usage: {result['total_usage']}")
-    
-    return result
-
+    try:
+        # Connect to RabbitMQ
+        connection = await aio_pika.connect_robust(
+            host=RABBITMQ_HOST,
+            port=RABBITMQ_PORT,
+            login=RABBITMQ_USER,
+            password=RABBITMQ_PASSWORD
+        )
+        
+        async with connection:
+            # Create channel
+            channel = await connection.channel()
+            await channel.set_qos(prefetch_count=1)  # Process one message at a time
+            
+            # Declare queue (creates if doesn't exist)
+            queue = await channel.declare_queue(
+                RABBITMQ_QUEUE,
+                durable=True  # Queue survives broker restart
+            )
+            
+            print(f"✅ [RABBITMQ] Connected successfully")
+            print(f"🎧 [RABBITMQ] Listening for alerts on queue: {RABBITMQ_QUEUE}")
+            print(f"🎧 [RABBITMQ] Waiting for messages. To exit press CTRL+C")
+            
+            # Start consuming messages
+            await queue.consume(process_alert_message)
+            
+            # Keep the consumer running
+            await asyncio.Future()
+            
+    except aio_pika.exceptions.AMQPConnectionError as e:
+        print(f"❌ [RABBITMQ] Connection error: {e}")
+        print(f"� [RABBITMQ] Make sure RabbitMQ is running and credentials are correct")
+    except Exception as e:
+        print(f"❌ [RABBITMQ] Error: {e}")
 
 
 async def main():
     """
-    Run demo scenarios to showcase Kubernetes MCP integration with Agent Hand-off pattern.
+    Start the AI-Ops Incident Responder with RabbitMQ integration.
     """
-    print("🚀 AI-Ops Incident Responder - Kubernetes MCP Integration Demo")
-    print("Demonstrating Programmatic Agent Hand-off Pattern with Real Kubernetes MCP")
+    print("=" * 80)
+    print("🚀 AI-Ops Incident Responder - RabbitMQ Consumer")
+    print("=" * 80)
+    print("Programmatic Agent Hand-off Pattern with Kubernetes MCP Integration")
     
     # Check MCP status
     mcp_status = "✅ Available" if kubernetes_mcp_servers else "❌ Not Available (using fallback)"
     print(f"🔌 Kubernetes MCP Status: {mcp_status}")
+    print(f"📢 Teams Webhook Status: {'✅ Configured' if TEAMS_WEBHOOK_URL else '❌ Not configured'}")
+    print(f"🤖 LLM Provider: {'LLM Farm' if USE_LLM_FARM else 'OpenAI'}")
+    print("=" * 80)
     
-    # Run all scenarios
-    scenario1_result = await demo_scenario_1()
-    scenario2_result = await demo_scenario_2() 
-    
-    # Summary
-    print("\n" + "="*80)
-    print("📈 DEMO SUMMARY")
-    print("="*80)
-    print(f"Scenario 1 (Pod Issue + MCP): {scenario1_result['status']}")
-    print(f"Scenario 2 (Complex Analysis): {scenario2_result['status']}")
-    print(f"\n🔌 MCP Integration: {'Active' if kubernetes_mcp_servers else 'Fallback Mode'}")
-    print("\n✅ Demo completed! All scenarios tested with Kubernetes MCP integration.")
-    
-    # Allow MCP connections to close gracefully
-    print("🔧 [CLEANUP] Allowing MCP connections to close gracefully...")
-    await asyncio.sleep(1.0)  # Give time for cleanup
+    # Start consuming alerts from RabbitMQ
+    await consume_alerts()
     
 if __name__ == "__main__":
     try:
