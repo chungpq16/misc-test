@@ -193,6 +193,7 @@ class RealTeamsWebhook:
                     return True
                 else:
                     print(f"❌ [TEAMS] Failed to send notification: {response.status_code}")
+                    print(f"❌ [TEAMS] Response: {response.text}")
                     return False
                     
         except ImportError:
@@ -202,6 +203,166 @@ class RealTeamsWebhook:
             return False
         except Exception as e:
             print(f"❌ [TEAMS] Error sending notification: {e}")
+            return False
+
+
+class ActionTeamsWebhook:
+    """Teams webhook specifically for Action Agent with green success cards."""
+    
+    def __init__(self, webhook_url: str):
+        self.webhook_url = webhook_url
+    
+    async def send_action_notification(
+        self,
+        title: str,
+        issue_summary: str,
+        actions_taken: list[str],
+        before_state: str,
+        after_state: str,
+        verification_steps: list[str]
+    ) -> bool:
+        """Send Action Agent notification to Teams."""
+        if not self.webhook_url:
+            print("⚠️  [TEAMS] No webhook URL configured")
+            return False
+        
+        teams_message = {
+            "@type": "MessageCard",
+            "@context": "https://schema.org/extensions",
+            "themeColor": "28a745",
+            "summary": title,
+            "sections": [
+                {
+                    "activityTitle": "✅ " + title,
+                    "activitySubtitle": "AI-Ops Action Agent - Automated Remediation",
+                    "facts": [
+                        {"name": "Issue Summary:", "value": issue_summary},
+                        {"name": "Before State:", "value": before_state},
+                        {"name": "After State:", "value": after_state}
+                    ],
+                    "markdown": True
+                },
+                {
+                    "activityTitle": "🔧 Actions Taken",
+                    "text": "\n".join([f"- {action}" for action in actions_taken])
+                },
+                {
+                    "activityTitle": "✓ Verification Steps",
+                    "text": "\n".join([f"- {step}" for step in verification_steps])
+                }
+            ]
+        }
+        
+        return await self._send(teams_message)
+    
+    async def _send(self, message: dict) -> bool:
+        """Internal method to send message."""
+        try:
+            import httpx
+            print(f"📢 [ACTION AGENT TEAMS] Sending notification...")
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.webhook_url,
+                    json=message,
+                    timeout=10.0
+                )
+                
+                if response.status_code == 200:
+                    print("✅ [ACTION AGENT TEAMS] Notification sent successfully")
+                    return True
+                else:
+                    print(f"❌ [ACTION AGENT TEAMS] Failed: {response.status_code}")
+                    print(f"❌ [ACTION AGENT TEAMS] Response: {response.text}")
+                    return False
+        except Exception as e:
+            print(f"❌ [ACTION AGENT TEAMS] Error: {e}")
+            return False
+
+
+class CommunicatorTeamsWebhook:
+    """Teams webhook specifically for Communicator Agent with severity-colored cards."""
+    
+    def __init__(self, webhook_url: str):
+        self.webhook_url = webhook_url
+    
+    async def send_escalation_notification(
+        self,
+        title: str,
+        summary: str,
+        root_cause: str,
+        severity: str,
+        immediate_actions: list[str],
+        efficiency_improvements: list[str]
+    ) -> bool:
+        """Send Communicator Agent notification to Teams."""
+        if not self.webhook_url:
+            print("⚠️  [TEAMS] No webhook URL configured")
+            return False
+        
+        severity_colors = {
+            "low": "0078d4",
+            "medium": "ffa500",
+            "high": "ff6347",
+            "critical": "dc143c"
+        }
+        
+        theme_color = severity_colors.get(severity.lower(), "0078d4")
+        
+        teams_message = {
+            "@type": "MessageCard",
+            "@context": "https://schema.org/extensions",
+            "themeColor": theme_color,
+            "summary": title,
+            "sections": [
+                {
+                    "activityTitle": "🚨 " + title,
+                    "activitySubtitle": "AI-Ops Communicator Agent - Kubernetes Expert Analysis",
+                    "facts": [
+                        {"name": "Severity:", "value": severity.upper()},
+                        {"name": "Summary:", "value": summary}
+                    ],
+                    "markdown": True
+                },
+                {
+                    "activityTitle": "🔍 Root Cause Analysis",
+                    "text": root_cause
+                },
+                {
+                    "activityTitle": "⚡ Immediate Actions Required",
+                    "text": "\n".join([f"{i+1}. {action}" for i, action in enumerate(immediate_actions)])
+                },
+                {
+                    "activityTitle": "🎯 Efficiency Improvements & Long-term Solutions",
+                    "text": "\n".join([f"• {improvement}" for improvement in efficiency_improvements])
+                }
+            ]
+        }
+        
+        return await self._send(teams_message)
+    
+    async def _send(self, message: dict) -> bool:
+        """Internal method to send message."""
+        try:
+            import httpx
+            print(f"📢 [COMMUNICATOR AGENT TEAMS] Sending notification...")
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.webhook_url,
+                    json=message,
+                    timeout=10.0
+                )
+                
+                if response.status_code == 200:
+                    print("✅ [COMMUNICATOR AGENT TEAMS] Notification sent successfully")
+                    return True
+                else:
+                    print(f"❌ [COMMUNICATOR AGENT TEAMS] Failed: {response.status_code}")
+                    print(f"❌ [COMMUNICATOR AGENT TEAMS] Response: {response.text}")
+                    return False
+        except Exception as e:
+            print(f"❌ [COMMUNICATOR AGENT TEAMS] Error: {e}")
             return False
 
 
@@ -262,9 +423,9 @@ orchestrator_agent = Agent[MockVectorDB, AlertDecision](
     """)
 
 # 2. Action Agent - Executes Kubernetes operations via MCP
-action_agent = Agent[RealTeamsWebhook, ActionResult](
+action_agent = Agent[ActionTeamsWebhook, ActionResult](
     model,  # Use configured model (LLM Farm or OpenAI)
-    deps_type=RealTeamsWebhook,  # Now has Teams webhook access
+    deps_type=ActionTeamsWebhook,  # Dedicated Teams webhook for Action Agent
     output_type=ActionResult,
     toolsets=kubernetes_mcp_servers,  # Real Kubernetes MCP servers
     system_prompt="""
@@ -311,9 +472,9 @@ action_agent = Agent[RealTeamsWebhook, ActionResult](
     """)
 
 # 3. Communicator Agent - Handles escalations and notifications
-communicator_agent = Agent[RealTeamsWebhook, EscalationReport](
+communicator_agent = Agent[CommunicatorTeamsWebhook, EscalationReport](
     model,  # Use configured model (LLM Farm or OpenAI)
-    deps_type=RealTeamsWebhook,  # Now has Teams webhook access
+    deps_type=CommunicatorTeamsWebhook,  # Dedicated Teams webhook for Communicator Agent
     output_type=EscalationReport,
     system_prompt="""
     You are an AI-Ops Communicator Agent and Kubernetes Expert for incident escalation and analysis.
@@ -419,44 +580,14 @@ async def send_teams_notification(
     """
     print(f"📢 [ACTION AGENT] Sending Teams notification: {title}")
     
-    # Create adaptive card message for Teams (original working format)
-    teams_message = {
-        "@type": "MessageCard",
-        "@context": "https://schema.org/extensions",
-        "themeColor": "28a745",  # Green for success
-        "summary": title,
-        "sections": [
-            {
-                "activityTitle": "✅ " + title,
-                "activitySubtitle": "AI-Ops Action Agent - Automated Remediation",
-                "facts": [
-                    {
-                        "name": "Issue Summary:",
-                        "value": issue_summary
-                    },
-                    {
-                        "name": "Before State:",
-                        "value": before_state
-                    },
-                    {
-                        "name": "After State:",
-                        "value": after_state
-                    }
-                ],
-                "markdown": True
-            },
-            {
-                "activityTitle": "🔧 Actions Taken",
-                "text": "\n".join([f"- {action}" for action in actions_taken])
-            },
-            {
-                "activityTitle": "✓ Verification Steps",
-                "text": "\n".join([f"- {step}" for step in verification_steps])
-            }
-        ]
-    }
-    
-    success = await ctx.deps.send_message(teams_message)
+    success = await ctx.deps.send_action_notification(
+        title=title,
+        issue_summary=issue_summary,
+        actions_taken=actions_taken,
+        before_state=before_state,
+        after_state=after_state,
+        verification_steps=verification_steps
+    )
     return success
 
 
@@ -488,54 +619,14 @@ async def send_teams_notification(
     """
     print(f"📢 [COMMUNICATOR AGENT] Sending Teams notification: {title}")
     
-    # Determine color based on severity
-    severity_colors = {
-        "low": "0078d4",      # Blue
-        "medium": "ffa500",   # Orange
-        "high": "ff6347",     # Red-Orange
-        "critical": "dc143c"  # Crimson
-    }
-    
-    theme_color = severity_colors.get(severity.lower(), "0078d4")
-    
-    # Create adaptive card message for Teams - keep colons like Action Agent
-    teams_message = {
-        "@type": "MessageCard",
-        "@context": "https://schema.org/extensions",
-        "themeColor": theme_color,
-        "summary": title,
-        "sections": [
-            {
-                "activityTitle": "🚨 " + title,
-                "activitySubtitle": "AI-Ops Communicator Agent - Kubernetes Expert Analysis",
-                "facts": [
-                    {
-                        "name": "Severity:",
-                        "value": severity.upper()
-                    },
-                    {
-                        "name": "Summary:",
-                        "value": summary
-                    }
-                ],
-                "markdown": True
-            },
-            {
-                "activityTitle": "🔍 Root Cause Analysis",
-                "text": root_cause
-            },
-            {
-                "activityTitle": "⚡ Immediate Actions Required",
-                "text": "\n".join([f"{i+1}. {action}" for i, action in enumerate(immediate_actions)])
-            },
-            {
-                "activityTitle": "🎯 Efficiency Improvements & Long-term Solutions",
-                "text": "\n".join([f"• {improvement}" for improvement in efficiency_improvements])
-            }
-        ]
-    }
-    
-    success = await ctx.deps.send_message(teams_message)
+    success = await ctx.deps.send_escalation_notification(
+        title=title,
+        summary=summary,
+        root_cause=root_cause,
+        severity=severity,
+        immediate_actions=immediate_actions,
+        efficiency_improvements=efficiency_improvements
+    )
     return success
 
 
@@ -553,7 +644,8 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
     
     # Dependencies
     vector_db = MockVectorDB()
-    teams_webhook = RealTeamsWebhook(TEAMS_WEBHOOK_URL)
+    action_teams_webhook = ActionTeamsWebhook(TEAMS_WEBHOOK_URL)
+    communicator_teams_webhook = CommunicatorTeamsWebhook(TEAMS_WEBHOOK_URL)
     
     # Check if Kubernetes MCP servers are available
     mcp_available = len(kubernetes_mcp_servers) > 0
@@ -613,7 +705,7 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
             try:
                 action_result = await action_agent.run(
                     action_prompt,
-                    deps=teams_webhook,
+                    deps=action_teams_webhook,
                     usage=shared_usage
                 )
                 result = action_result.output
@@ -699,7 +791,7 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
             try:
                 escalation_result = await communicator_agent.run(
                     escalation_prompt,
-                    deps=teams_webhook,
+                    deps=communicator_teams_webhook,
                     usage=shared_usage
                 )
                 
