@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "k8s": {
+      "type": "stdio",
+      "command": "/Users/chung/.nvm/versions/node/v22.11.0/bin/node",
+      "args": ["/Volumes/Data/DevOps/Learning/AI/GenAI-app/ai-ops-incident-responder/mcp-server-kubernetes/dist/index.js"],
+      "env": {"KUBECONFIG_PATH": "/Volumes/Data/DevOps/Learning/AI/GenAI-app/ai-ops-incident-responder/kubeconfig.yaml"}
+    }
+  }
+}

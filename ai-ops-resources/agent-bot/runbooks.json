@@ -1,0 +1,51 @@
+{
+  "pod_issues": {
+    "description": "Handle pod-related problems in Kubernetes",
+    "triggers": ["pod", "container", "crashloopbackoff", "imagepullbackoff", "kube-system"],
+    "actions": [
+      "List all pods in the affected namespace",
+      "Check pod status and events",
+      "Restart failing pods if safe",
+      "Check resource limits and requests"
+    ],
+    "kubernetes_commands": [
+      "kubectl get pods -n kube-system",
+      "kubectl describe pod {pod_name} -n {namespace}",
+      "kubectl logs {pod_name} -n {namespace}"
+    ]
+  },
+  "resource_issues": {
+    "description": "Handle resource-related problems",
+    "triggers": ["cpu", "memory", "disk", "resource", "limit"],
+    "actions": [
+      "Check resource utilization",
+      "Scale deployments if needed",
+      "Analyze resource requests vs limits"
+    ]
+  },
+  "performance_issues": {
+    "description": "Handle performance and scaling problems",
+    "triggers": ["latency", "slow", "timeout", "overload", "high cpu", "high memory", "response time", "scale", "replica"],
+    "actions": [
+      "Check current deployment replica count",
+      "Monitor resource utilization",
+      "Scale up replicas by 1 instance",
+      "Verify scaling operation success",
+      "Monitor performance after scaling"
+    ],
+    "kubernetes_commands": [
+      "kubectl get deployment nginx -n default",
+      "kubectl scale deployment nginx --replicas=2 -n default",
+      "kubectl get pods -n default -l app=nginx"
+    ]
+  },
+  "network_issues": {
+    "description": "Handle networking problems",
+    "triggers": ["network", "connection", "timeout", "dns"],
+    "actions": [
+      "Check service endpoints",
+      "Verify network policies",
+      "Test connectivity between services"
+    ]
+  }
+}
