@@ -60,7 +60,7 @@ class EscalationReport(BaseModel):
     recommended_actions: list[str]
     efficiency_improvements: list[str] = Field(description="Long-term efficiency improvements and optimizations")
     severity: Literal["low", "medium", "high", "critical"]
-    teams_notification_sent: bool = False
+    teams_notification_sent: bool = Field(default=False, description="Whether Teams notification was sent successfully")
 
 
 # === Hardcoded Runbook Knowledge Base ===
@@ -315,8 +315,9 @@ communicator_agent = Agent[RealTeamsWebhook, EscalationReport](
     2. Provide comprehensive root cause analysis based on Kubernetes best practices
     3. Recommend specific, actionable solutions for immediate resolution
     4. Suggest long-term efficiency improvements and optimizations
-    5. Send detailed analysis and recommendations to Microsoft Teams
+    5. Send detailed analysis and recommendations to Microsoft Teams using the send_teams_notification tool
     6. Estimate severity and impact on system and users
+    7. Set teams_notification_sent to True in your output if notification was sent successfully
     
     Analysis Framework:
     - Apply Kubernetes troubleshooting best practices
@@ -354,7 +355,11 @@ communicator_agent = Agent[RealTeamsWebhook, EscalationReport](
     - Impact on users and business operations
     - Urgency level for resolution
     
-    Always send your analysis to Teams using the send_teams_notification tool.
+    **Teams Notification**:
+    - ALWAYS call send_teams_notification tool with your analysis
+    - After calling the tool, check the return value
+    - Set teams_notification_sent field based on the tool's return value (True if successful, False if failed)
+    
     Provide actionable, practical guidance that operators can implement immediately.
     """)
 
@@ -684,22 +689,37 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
                - Impact on users and business
                - Urgency for resolution
             
-            After completing your analysis, send it to Microsoft Teams using send_teams_notification tool with:
-            - Title: "Critical Kubernetes Incident Analysis - [Issue Type]"
-            - Summary: Executive summary
-            - Root cause: Your detailed analysis
-            - Severity: Assessed severity level
-            - Immediate actions: List of remediation steps
-            - Efficiency improvements: List of optimization recommendations
+            IMPORTANT: After completing your analysis, you MUST call the send_teams_notification tool with these parameters:
+            - title: "Critical Kubernetes Incident Analysis - [Brief Issue Type]"
+            - summary: Your executive summary (2-3 sentences)
+            - root_cause: Your detailed root cause analysis
+            - severity: One of: low, medium, high, critical
+            - immediate_actions: List of 3-5 remediation steps
+            - efficiency_improvements: List of 5-10 optimization recommendations
+            
+            You must call send_teams_notification before completing your response.
             """
             
-            escalation_result = await communicator_agent.run(
-                escalation_prompt,
-                deps=teams_webhook,
-                usage=shared_usage
-            )
+            try:
+                escalation_result = await communicator_agent.run(
+                    escalation_prompt,
+                    deps=teams_webhook,
+                    usage=shared_usage
+                )
+                
+                report = escalation_result.output
+            except Exception as e:
+                print(f"❌ [COMMUNICATOR ERROR] {e}")
+                # Create a fallback report
+                report = EscalationReport(
+                    summary=f"Failed to generate full analysis: {str(e)}",
+                    root_cause_analysis="Analysis incomplete due to error",
+                    recommended_actions=["Review logs", "Manual investigation required"],
+                    efficiency_improvements=["Implement better error handling"],
+                    severity="high",
+                    teams_notification_sent=False
+                )
             
-            report = escalation_result.output
             print(f"📊 [ESCALATION] Severity: {report.severity}")
             print(f"📊 [ESCALATION] Summary: {report.summary}")
             print(f"📊 [ESCALATION] Recommended actions: {len(report.recommended_actions)}")
