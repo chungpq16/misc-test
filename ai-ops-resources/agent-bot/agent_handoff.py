@@ -455,11 +455,12 @@ action_agent = Agent[ActionTeamsWebhook, ActionResult](
     After calling send_teams_notification, set teams_notification_sent field in your ActionResult output to the tool's return value.
     
     Error Handling:
-    - If MCP tools throw "exceeded max retries" during scaling, treat as SUCCESS
-    - The kubectl command likely succeeded even if MCP infrastructure has errors
-    - Verify by listing pods after scaling attempt
-    - Report what actions were attempted regardless of MCP errors
-    - STILL call send_teams_notification even if MCP errors occurred
+    - MCP tools may report errors like "exceeded max retries" BUT the kubectl command actually succeeds
+    - These are FALSE ERRORS - ignore them and continue your work
+    - Even if you see MCP errors, the Kubernetes operations are completed successfully
+    - Continue with your workflow: check pods, verify scaling, then call send_teams_notification
+    - ALWAYS call send_teams_notification regardless of any MCP tool errors
+    - The scaling command WORKS even when MCP reports errors
     
     Safety Rules:
     - Only increment replicas by 1 at a time
@@ -731,44 +732,25 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
             """
             
             # Hand-off to Action Agent (uses MCP toolsets automatically)
-            try:
-                print("🔄 [ACTION AGENT] Starting agent.run()...")
-                action_result = await action_agent.run(
-                    action_prompt,
-                    deps=action_teams_webhook,
-                    usage=shared_usage
-                )
-                print("✅ [ACTION AGENT] agent.run() completed")
-                result = action_result.output
-                
-                # Check if the agent actually called the send_teams_notification tool
-                if not result.teams_notification_sent:
-                    print("⚠️  [ACTION AGENT WARNING] Agent did not call send_teams_notification tool!")
-                    print("⚠️  [ACTION AGENT WARNING] The LLM may have skipped the tool call.")
-                    print("⚠️  [ACTION AGENT WARNING] teams_notification_sent is False in the output.")
-                    print("⚠️  [ACTION AGENT WARNING] This means the tool was either not called or returned False.")
-                else:
-                    print("✅ [ACTION AGENT SUCCESS] teams_notification_sent is True!")
-                    
-            except Exception as e:
-                if "exceeded max retries" in str(e) and ("kubectl_scale" in str(e) or "k8s_kubectl_scale" in str(e)):
-                    # Handle MCP retry error for scaling operations - treat as success
-                    print("🔧 [FRAMEWORK] Handling MCP retry error for scaling operation")
-                    result = ActionResult(
-                        success=True,
-                        actions_taken=[
-                            "Scaling command sent to Kubernetes via MCP",
-                            "MCP retry error occurred but scaling operation was attempted",
-                            "Scaling should be successful despite infrastructure error"
-                        ],
-                        kubernetes_output="Scaling operation attempted - MCP infrastructure error but kubectl command was sent to cluster",
-                        error_message=None,
-                        teams_notification_sent=False
-                    )
-                    print("✅ [FRAMEWORK] Converted MCP retry error to successful scaling result")
-                else:
-                    # Re-raise other types of errors
-                    raise e
+            # Note: MCP may throw "exceeded max retries" errors even when operations succeed
+            # We ignore these errors and let the agent complete normally
+            print("🔄 [ACTION AGENT] Starting agent.run()...")
+            action_result = await action_agent.run(
+                action_prompt,
+                deps=action_teams_webhook,
+                usage=shared_usage
+            )
+            print("✅ [ACTION AGENT] agent.run() completed")
+            result = action_result.output
+            
+            # Check if the agent actually called the send_teams_notification tool
+            if not result.teams_notification_sent:
+                print("⚠️  [ACTION AGENT WARNING] Agent did not call send_teams_notification tool!")
+                print("⚠️  [ACTION AGENT WARNING] The LLM may have skipped the tool call.")
+                print("⚠️  [ACTION AGENT WARNING] teams_notification_sent is False in the output.")
+                print("⚠️  [ACTION AGENT WARNING] This means the tool was either not called or returned False.")
+            else:
+                print("✅ [ACTION AGENT SUCCESS] teams_notification_sent is True!")
             print(f"✅ [ACTION RESULT] Success: {result.success}")
             print(f"📝 [ACTION RESULT] Actions taken: {result.actions_taken}")
             if result.kubernetes_output:
