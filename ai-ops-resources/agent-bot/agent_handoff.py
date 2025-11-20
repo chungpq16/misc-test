@@ -759,11 +759,21 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
         else:  # escalate
             print("\n📢 [STEP 2] Handing off to Communicator Agent...")
             
+            # Get runbook info if available
+            runbook_info = ""
+            if decision.runbook_match:
+                runbook_info = f"\n\nMatched Runbook: {decision.runbook_match}"
+            
             # Hand-off to Communicator Agent  
             escalation_prompt = f"""
             Analyze this complex Kubernetes incident as an expert and create comprehensive report: {alert_message}
             
-            Orchestrator's initial analysis: {decision.reasoning}
+            Orchestrator's initial analysis: {decision.reasoning}{runbook_info}
+            
+            CRITICAL REQUIREMENTS:
+            1. You MUST call the send_teams_notification tool with your analysis
+            2. The tool call is MANDATORY before completing your response
+            3. Set teams_notification_sent in your output based on the tool's return value
             
             Your expert analysis should include:
             
@@ -772,17 +782,17 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
                - Why this issue occurred from infrastructure perspective
                - What Kubernetes components or configurations are involved
             
-            2. **Immediate Actions**:
+            2. **Immediate Actions** (3-5 specific steps):
                - Step-by-step remediation procedures
-               - Specific kubectl commands operators should run
+               - Specific kubectl commands operators should run (use actual names from alert)
                - Expected outcomes and how to verify success
-               - Rollback procedures if needed
             
-            3. **Efficiency Improvements**:
+            3. **Efficiency Improvements** (5-10 recommendations):
                - Resource optimization (CPU, memory, replicas)
                - High availability improvements
                - Monitoring and alerting enhancements
-               - Automation opportunities
+               - Automation opportunities (HPA, pod disruption budgets)
+               - Network policies and security
                - Cost optimization recommendations
                - Performance tuning suggestions
                - Architecture improvements for long-term stability
@@ -790,32 +800,45 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
             4. **Severity Assessment**:
                - Impact on users and business
                - Urgency for resolution
+               - Use: critical, high, medium, or low
             
-            IMPORTANT: After completing your analysis, you MUST call the send_teams_notification tool with these parameters:
+            MANDATORY TOOL CALL:
+            You MUST call send_teams_notification tool with:
             - title: "Critical Kubernetes Incident Analysis - [Brief Issue Type]"
             - summary: Your executive summary (2-3 sentences)
-            - root_cause: Your detailed root cause analysis
+            - root_cause: Your detailed root cause analysis (200-300 words)
             - severity: One of: low, medium, high, critical
             - immediate_actions: List of 3-5 remediation steps
             - efficiency_improvements: List of 5-10 optimization recommendations
             
-            You must call send_teams_notification before completing your response.
+            After calling send_teams_notification, set teams_notification_sent field in your output to the tool's return value.
+            Do NOT complete your response without calling this tool first.
             """
             
+            print(f"📋 [ESCALATION PROMPT] Prompt length: {len(escalation_prompt)} characters")
+            print(f"📋 [ESCALATION PROMPT] Runbook match included: {bool(decision.runbook_match)}")
+            
             try:
+                print("🔄 [COMMUNICATOR] Starting agent.run()...")
                 escalation_result = await communicator_agent.run(
                     escalation_prompt,
                     deps=communicator_teams_webhook,
                     usage=shared_usage
                 )
+                print("✅ [COMMUNICATOR] agent.run() completed")
                 
                 report = escalation_result.output
+                print(f"📦 [COMMUNICATOR] Report generated: {type(report)}")
+                print(f"📦 [COMMUNICATOR] Report fields: summary={bool(report.summary)}, root_cause={bool(report.root_cause_analysis)}, actions={len(report.recommended_actions)}, improvements={len(report.efficiency_improvements)}")
                 
                 # Check if the agent actually called the send_teams_notification tool
                 if not report.teams_notification_sent:
                     print("⚠️  [COMMUNICATOR WARNING] Agent did not call send_teams_notification tool!")
                     print("⚠️  [COMMUNICATOR WARNING] The LLM may have skipped the tool call.")
-                    print("⚠️  [COMMUNICATOR WARNING] Check if the tool is available and the prompt is clear.")
+                    print("⚠️  [COMMUNICATOR WARNING] teams_notification_sent is False in the output.")
+                    print("⚠️  [COMMUNICATOR WARNING] This means the tool was either not called or returned False.")
+                else:
+                    print("✅ [COMMUNICATOR SUCCESS] teams_notification_sent is True!")
                 
             except Exception as e:
                 print(f"❌ [COMMUNICATOR ERROR] {e}")
