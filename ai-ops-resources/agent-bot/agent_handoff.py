@@ -715,36 +715,52 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
         if decision.action == "handle":
             print("\n🤖 [STEP 2] Handing off to Action Agent...")
             
+            # Get the full runbook content from the knowledge base
+            runbook_info = ""
+            if decision.runbook_match:
+                # Query the vector DB again to get full runbook content
+                runbook_result = vector_db.query_runbook(alert_message)
+                if runbook_result:
+                    runbook_content = runbook_result["content"]
+                    runbook_info = f"""
+Matched Runbook: {runbook_result["id"]}
+Description: {runbook_content["description"]}
+Automation Safe: {runbook_content["automation_safe"]}
+
+Actions to Execute:
+{chr(10).join(f"- {action}" for action in runbook_content["actions"])}
+
+Kubernetes Commands Available:
+{chr(10).join(f"- {cmd}" for cmd in runbook_content.get("kubernetes_commands", []))}
+"""
+            
             # Prepare the prompt for Action Agent
             action_prompt = f"""
-            Execute remediation actions for this Kubernetes alert: {alert_message}
-            
-            Runbook guidance: {decision.runbook_match}
-            
-            Instructions:
-            1. First, check the current state of the deployment in default namespace
-            2. Get current replica count and pod status (record as "before_state")
-            3. If this is a performance/latency issue, scale up the deployment by 1 replica
-            4. Use available MCP tools for Kubernetes operations
-            5. Verify scaling operation completed successfully
-            6. Monitor pods after scaling to ensure they are running (record as "after_state")
-            7. Send comprehensive summary to Microsoft Teams using send_teams_notification tool
-            
-            For Teams notification, include:
-            - Title: "Kubernetes Issue Resolved - [Brief Description]"
-            - Issue summary: What problem was detected
-            - Actions taken: All remediation steps performed
-            - Before state: Resource state before remediation
-            - After state: Resource state after remediation
-            - Verification steps: How you confirmed the fix worked
-            
-            Available operations:
-            - List pods and deployments in namespaces  
-            - Get current replica count
-            - Scale deployments safely (increment by 1)
-            - Monitor pod status after scaling
-            - Send Teams notification after completion
-            """
+Execute remediation actions for this Kubernetes alert: {alert_message}
+
+{runbook_info}
+
+Instructions:
+1. Parse the alert to extract: deployment_name, namespace, pod_name, app_label
+2. Review the runbook actions above
+3. Execute each runbook action step-by-step:
+   - Replace placeholders like {{deployment_name}}, {{namespace}}, {{pod_name}} with actual values from the alert
+   - Use MCP kubectl tools for all Kubernetes operations
+   - Record "before state" before taking remediation actions
+   - Record "after state" after completing remediation
+4. Verify the remediation was successful
+5. MANDATORY: Call send_teams_notification tool with complete summary
+
+For Teams notification, include:
+- Title: "Kubernetes Issue Resolved - [Brief Description]"
+- Issue summary: What problem was detected from the alert
+- Actions taken: All remediation steps you performed (specific kubectl commands)
+- Before state: Resource state before remediation
+- After state: Resource state after remediation
+- Verification steps: How you confirmed the fix worked
+
+Remember: Follow the runbook actions exactly as specified above.
+"""
             
             # Hand-off to Action Agent (uses MCP toolsets automatically)
             # Note: MCP may throw "exceeded max retries" errors even when operations succeed
