@@ -101,8 +101,8 @@
     "requires_investigation": true
   },
   "PerformanceIssues": {
-    "description": "Application experiencing performance degradation including high latency, slow response times, or resource constraints",
-    "triggers": ["latency", "slow", "timeout", "overload", "high cpu", "high memory", "response time", "performance", "degraded"],
+    "description": "Application experiencing performance degradation including high latency, slow response times, or resource constraints. Application is still processing requests but slowly.",
+    "triggers": ["latency", "slow response", "high response time", "overload", "high cpu", "high memory", "performance", "degraded", "slow requests"],
     "meaning": "Application is running but not performing optimally. May be caused by insufficient replicas, resource constraints, or increased load.",
     "impact": [
       "Slow response times affecting user experience",
@@ -184,8 +184,8 @@
     "requires_investigation": true
   },
   "ApplicationStuck": {
-    "description": "Application or pods appear stuck, unresponsive, or hanging without crashing. Often requires restart to recover.",
-    "triggers": ["stuck", "hanging", "unresponsive", "frozen", "deadlock", "not responding", "application hang"],
+    "description": "Application or pods are completely stuck, frozen, or deadlocked with ZERO activity. Not processing any requests at all. Different from slow performance - this is complete freeze requiring restart.",
+    "triggers": ["stuck", "hanging", "frozen", "deadlock", "deadlocked", "not responding", "no response", "application hang", "completely unresponsive", "zero activity", "thread dump"],
     "meaning": "Application is running but not processing requests. May be due to deadlock, resource exhaustion, or internal application state issues. Restart often resolves the issue.",
     "impact": [
       "Application completely unresponsive to requests",

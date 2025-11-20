@@ -32,5 +32,5 @@ alert3 = {
   "severity": "HIGH",
   "source": "application-monitoring",
   "timestamp": "2025-11-12T10:40:00Z",
-  "message": "HIGH: Nginx deployment in default namespace appears unresponsive and stuck. Application not responding to health checks. Pods showing hanging behavior with no request processing. Service appears frozen despite being in Running state. Immediate restart required to recover service."
+  "message": "HIGH: Nginx deployment in default namespace is completely frozen and deadlocked. Application hanging with no response to requests. Pods are stuck in unresponsive state showing zero activity. Thread dump indicates deadlock condition in application code."
 }
