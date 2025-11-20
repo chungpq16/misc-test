@@ -409,19 +409,25 @@ action_agent = Agent[ActionTeamsWebhook, ActionResult](
     system_prompt="""
     You are an AI-Ops Action Agent for Kubernetes operations.
     
+    CRITICAL REQUIREMENTS:
+    1. You MUST call the send_teams_notification tool after completing remediation
+    2. The tool call is MANDATORY before completing your response
+    3. Set teams_notification_sent in your output based on the tool's return value
+    4. Do NOT complete your response without calling this tool first
+    
     Your job is to:
     1. Follow the runbook's action steps provided in the prompt
     2. Extract deployment/pod/namespace names from the alert message
     3. Execute Kubernetes operations using available MCP tools
     4. Always verify state BEFORE and AFTER taking action
-    5. Send Teams notification after completion
+    5. MANDATORY: Send Teams notification after completion
     
     Workflow:
     1. Parse alert to identify: deployment_name, namespace, app_label
     2. Follow runbook actions in sequence (check current state → take action → verify)
     3. Use MCP tools for all kubectl operations
     4. Record state before/after for Teams notification
-    5. Call send_teams_notification tool with complete summary
+    5. MANDATORY: Call send_teams_notification tool with complete summary
     
     For Performance/Scaling Issues:
     1. List deployment to get current replica count: kubectl get deployment {deployment_name} -n {namespace}
@@ -431,31 +437,37 @@ action_agent = Agent[ActionTeamsWebhook, ActionResult](
     5. Verify scaling: kubectl get pods -n {namespace} -l app={app_label}
     6. Record "after state": new replicas and running pods
     7. Verification: Confirm new pods are Running and Ready
+    8. MANDATORY: Call send_teams_notification with all details
     
     Parsing Alert Examples:
     - "Nginx deployment in default namespace" → deployment_name=nginx, namespace=default
     - "experiencing high latency" → This is a performance issue requiring scaling
     
-    Teams Notification (MANDATORY):
-    - ALWAYS call send_teams_notification tool after remediation
-    - Title: "Kubernetes Issue Resolved - Performance Scaling"
-    - Issue summary: Brief description from alert
-    - Actions taken: List all kubectl commands executed
-    - Before state: "Deployment had X replicas, Y pods running"
-    - After state: "Deployment scaled to X+1 replicas, Y+1 pods running"
-    - Verification steps: "Confirmed all pods are Running and Ready"
+    MANDATORY TOOL CALL - Teams Notification:
+    You MUST call send_teams_notification tool with these parameters:
+    - title: "Kubernetes Issue Resolved - [Brief Description]" (e.g., "Kubernetes Issue Resolved - Performance Scaling")
+    - issue_summary: Brief description of what problem was detected from the alert
+    - actions_taken: List of all kubectl commands executed (e.g., ["Listed deployment replicas", "Scaled deployment from 2 to 3 replicas", "Verified new pods running"])
+    - before_state: State before remediation (e.g., "Deployment had 2 replicas, 2 pods running")
+    - after_state: State after remediation (e.g., "Deployment scaled to 3 replicas, 3 pods running")
+    - verification_steps: How you confirmed the fix (e.g., ["Confirmed all pods are Running and Ready", "Verified pod count matches replica count"])
+    
+    After calling send_teams_notification, set teams_notification_sent field in your ActionResult output to the tool's return value.
     
     Error Handling:
     - If MCP tools throw "exceeded max retries" during scaling, treat as SUCCESS
     - The kubectl command likely succeeded even if MCP infrastructure has errors
     - Verify by listing pods after scaling attempt
     - Report what actions were attempted regardless of MCP errors
+    - STILL call send_teams_notification even if MCP errors occurred
     
     Safety Rules:
     - Only increment replicas by 1 at a time
     - Never delete or modify pod specs
     - Always verify before destructive operations
     - Focus on read operations first, then safe corrective actions
+    
+    REMEMBER: The send_teams_notification tool call is NOT optional. It is MANDATORY before you complete your response.
     """)
 
 # 3. Communicator Agent - Handles escalations and notifications
@@ -720,12 +732,24 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
             
             # Hand-off to Action Agent (uses MCP toolsets automatically)
             try:
+                print("🔄 [ACTION AGENT] Starting agent.run()...")
                 action_result = await action_agent.run(
                     action_prompt,
                     deps=action_teams_webhook,
                     usage=shared_usage
                 )
+                print("✅ [ACTION AGENT] agent.run() completed")
                 result = action_result.output
+                
+                # Check if the agent actually called the send_teams_notification tool
+                if not result.teams_notification_sent:
+                    print("⚠️  [ACTION AGENT WARNING] Agent did not call send_teams_notification tool!")
+                    print("⚠️  [ACTION AGENT WARNING] The LLM may have skipped the tool call.")
+                    print("⚠️  [ACTION AGENT WARNING] teams_notification_sent is False in the output.")
+                    print("⚠️  [ACTION AGENT WARNING] This means the tool was either not called or returned False.")
+                else:
+                    print("✅ [ACTION AGENT SUCCESS] teams_notification_sent is True!")
+                    
             except Exception as e:
                 if "exceeded max retries" in str(e) and ("kubectl_scale" in str(e) or "k8s_kubectl_scale" in str(e)):
                     # Handle MCP retry error for scaling operations - treat as success
