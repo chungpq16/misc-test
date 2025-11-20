@@ -145,15 +145,25 @@ class MockVectorDB:
     """Mock vector database for runbook queries."""
     
     def query_runbook(self, alert_content: str) -> dict | None:
-        """Find matching runbook based on alert content."""
+        """Find matching runbook based on alert content with best-match scoring."""
         alert_lower = alert_content.lower()
         
+        # Score each runbook by counting matching triggers
+        best_match = None
+        best_score = 0
+        
         for runbook_id, runbook in RUNBOOK_KB.items():
+            match_count = 0
             for trigger in runbook["triggers"]:
                 if trigger in alert_lower:
-                    return {"id": runbook_id, "content": runbook}
+                    match_count += 1
+            
+            # Update best match if this runbook has more trigger matches
+            if match_count > best_score:
+                best_score = match_count
+                best_match = {"id": runbook_id, "content": runbook}
         
-        return None
+        return best_match
 
 
 class ActionTeamsWebhook:
