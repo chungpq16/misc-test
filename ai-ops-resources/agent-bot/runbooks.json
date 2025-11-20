@@ -183,6 +183,49 @@
     "automation_safe": false,
     "requires_investigation": true
   },
+  "ApplicationStuck": {
+    "description": "Application or pods appear stuck, unresponsive, or hanging without crashing. Often requires restart to recover.",
+    "triggers": ["stuck", "hanging", "unresponsive", "frozen", "deadlock", "not responding", "application hang"],
+    "meaning": "Application is running but not processing requests. May be due to deadlock, resource exhaustion, or internal application state issues. Restart often resolves the issue.",
+    "impact": [
+      "Application completely unresponsive to requests",
+      "Users experiencing timeouts or no response",
+      "Service appears up but not functioning",
+      "Potential data processing delays or queue backlog"
+    ],
+    "diagnosis_steps": [
+      "Check if pods are in Running state but not responding",
+      "Review application logs for deadlock or hang indicators",
+      "Check if liveness probe is failing (should trigger restart automatically)",
+      "Monitor resource usage - may show low activity despite being stuck",
+      "Check thread dumps or application-specific debugging info",
+      "Verify no external dependency is blocking (database locks, etc.)",
+      "Check if application is waiting indefinitely for resources",
+      "Review recent deployments or configuration changes"
+    ],
+    "actions": [
+      "Use kubectl get pods to verify pod is in Running state in the namespace",
+      "Use kubectl logs to check for deadlock, hang, or blocking operations",
+      "Use kubectl describe pod to check probe status and events",
+      "Restart the deployment using kubectl rollout restart command",
+      "Monitor pod restart and verify new pods come up healthy",
+      "Check application logs after restart to confirm normal operation",
+      "If issue persists: investigate application code or configuration",
+      "Consider adjusting liveness probe for earlier detection"
+    ],
+    "kubernetes_commands": [
+      "kubectl get pods -n {namespace} -l app={app_label}",
+      "kubectl logs {pod_name} -n {namespace} -c {container_name} --tail=100",
+      "kubectl describe pod {pod_name} -n {namespace}",
+      "kubectl rollout restart deployment {deployment_name} -n {namespace}",
+      "kubectl rollout status deployment {deployment_name} -n {namespace}",
+      "kubectl get pods -n {namespace} -l app={app_label} -w"
+    ],
+    "mitigation": "Restart deployment to recover immediately. Configure appropriate liveness probes to detect and restart automatically. Work with developers to identify and fix root cause (deadlocks, resource leaks, etc.).",
+    "automation_safe": true,
+    "requires_investigation": false,
+    "restart_strategy": "Use kubectl rollout restart to perform a rolling restart without downtime. Monitor rollout status to ensure successful restart."
+  },
   "NetworkIssues": {
     "description": "Connectivity problems between pods, services, or external endpoints including DNS failures and network timeouts",
     "triggers": ["network", "connection", "timeout", "dns", "connectivity", "unreachable", "connection refused", "service unavailable"],

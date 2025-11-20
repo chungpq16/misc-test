@@ -27,13 +27,10 @@ alert2 = {
   "message": "CRITICAL: Network connectivity issues affecting multiple microservices. Intermittent connection timeouts and service unavailable errors observed. Database connection failures with 'connection refused' errors occurring. API gateway experiencing network latency to unreachable backend services. DNS resolution failures detected across service mesh."
 }
 
-for i, alert in enumerate([alert1, alert2], 1):
-    channel.basic_publish(
-        exchange='',
-        routing_key='alert-queue',
-        body=json.dumps(alert),
-        properties=pika.BasicProperties(delivery_mode=2)
-    )
-    print(f"✅ Published Scenario {i}: {alert['severity']}")
-
-connection.close()
+# Scenario 3: Application Stuck - Safe for Automation (Restart)
+alert3 = {
+  "severity": "HIGH",
+  "source": "application-monitoring",
+  "timestamp": "2025-11-12T10:40:00Z",
+  "message": "HIGH: Nginx deployment in default namespace appears unresponsive and stuck. Application not responding to health checks. Pods showing hanging behavior with no request processing. Service appears frozen despite being in Running state. Immediate restart required to recover service."
+}
