@@ -35,7 +35,9 @@ LLM_FARM_API_KEY = os.getenv("LLM_FARM_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Teams Webhook Configuration
-TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK_URL", "")
+TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK_URL", "")  # Deprecated - use specific webhooks below
+ACTION_AGENT_WEBHOOK_URL = os.getenv("ACTION_AGENT_WEBHOOK_URL", "") or TEAMS_WEBHOOK_URL
+COMMUNICATOR_AGENT_WEBHOOK_URL = os.getenv("COMMUNICATOR_AGENT_WEBHOOK_URL", "") or TEAMS_WEBHOOK_URL
 
 # RabbitMQ Configuration
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
@@ -658,13 +660,14 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
     
     # Dependencies
     vector_db = MockVectorDB()
-    action_teams_webhook = ActionTeamsWebhook(TEAMS_WEBHOOK_URL)
-    communicator_teams_webhook = CommunicatorTeamsWebhook(TEAMS_WEBHOOK_URL)
+    action_teams_webhook = ActionTeamsWebhook(ACTION_AGENT_WEBHOOK_URL)
+    communicator_teams_webhook = CommunicatorTeamsWebhook(COMMUNICATOR_AGENT_WEBHOOK_URL)
     
     # Check if Kubernetes MCP servers are available
     mcp_available = len(kubernetes_mcp_servers) > 0
     print(f"🔌 [MCP STATUS] Kubernetes MCP servers available: {mcp_available}")
-    print(f"📢 [TEAMS STATUS] Webhook configured: {bool(TEAMS_WEBHOOK_URL)}")
+    print(f"📢 [TEAMS STATUS] Action Agent Webhook configured: {bool(ACTION_AGENT_WEBHOOK_URL)}")
+    print(f"📢 [TEAMS STATUS] Communicator Agent Webhook configured: {bool(COMMUNICATOR_AGENT_WEBHOOK_URL)}")
     
     try:
         # Step 1: Orchestrator analyzes the alert
@@ -976,7 +979,8 @@ async def main():
     # Check MCP status
     mcp_status = "✅ Available" if kubernetes_mcp_servers else "❌ Not Available (using fallback)"
     print(f"🔌 Kubernetes MCP Status: {mcp_status}")
-    print(f"📢 Teams Webhook Status: {'✅ Configured' if TEAMS_WEBHOOK_URL else '❌ Not configured'}")
+    print(f"📢 Action Agent Webhook: {'✅ Configured' if ACTION_AGENT_WEBHOOK_URL else '❌ Not configured'}")
+    print(f"📢 Communicator Agent Webhook: {'✅ Configured' if COMMUNICATOR_AGENT_WEBHOOK_URL else '❌ Not configured'}")
     print(f"🤖 LLM Provider: {'LLM Farm' if USE_LLM_FARM else 'OpenAI'}")
     print("=" * 80)
     
