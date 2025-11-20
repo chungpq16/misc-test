@@ -1,51 +1,230 @@
 {
-  "pod_issues": {
-    "description": "Handle pod-related problems in Kubernetes",
-    "triggers": ["pod", "container", "crashloopbackoff", "imagepullbackoff", "kube-system"],
+  "KubePodCrashLooping": {
+    "description": "Pod is in CrashLoop which means the app dies or is unresponsive and kubernetes tries to restart it automatically",
+    "triggers": ["crashloopbackoff", "crash loop", "pod crashing", "container restarting", "backoff"],
+    "meaning": "Pod repeatedly crashes and Kubernetes automatically restarts it. The pod enters a restart backoff state with increasing delays between restart attempts.",
+    "impact": [
+      "Service degradation or unavailability",
+      "Inability to perform rolling upgrades",
+      "Data migrations or scheduled tasks may not execute",
+      "Application functionality is compromised"
+    ],
+    "diagnosis_steps": [
+      "Check pod status and basic information using kubectl get pod command",
+      "Examine pod events for error messages using kubectl describe pod command",
+      "Review pod logs to identify application errors using kubectl logs command",
+      "Verify pod template parameters including priority, resources, probes",
+      "Check if readiness/liveness probes are configured correctly (port, command, timeout)",
+      "Verify resource requests - check for unavailable resources like GPU",
+      "Investigate if app is slow due to insufficient CPU or memory",
+      "Check if app is waiting for dependent services (database, cache, etc.)",
+      "Look for misconfiguration in environment variables or app config",
+      "Verify all required files exist (configmaps, secrets, volumes)",
+      "Check filesystem permissions and read-only constraints",
+      "Verify container user permissions and security context",
+      "Confirm WORKDIR and execution directory expectations"
+    ],
     "actions": [
-      "List all pods in the affected namespace",
-      "Check pod status and events",
-      "Restart failing pods if safe",
-      "Check resource limits and requests"
+      "Use kubectl get pod in the affected namespace to check current state",
+      "Use kubectl describe pod to see detailed events and configuration",
+      "Use kubectl logs to retrieve application logs (include --previous flag for crash logs)",
+      "Identify the root cause from logs and events",
+      "If resource constrained: adjust CPU/memory requests and limits",
+      "If probe misconfigured: update readiness/liveness probe settings",
+      "If missing dependencies: ensure configmaps, secrets, volumes are present",
+      "If permission issues: adjust securityContext or file permissions",
+      "If app startup issue: increase initialDelaySeconds for probes",
+      "Consult with developers for application-specific fixes"
     ],
     "kubernetes_commands": [
-      "kubectl get pods -n kube-system",
+      "kubectl get pod {pod_name} -n {namespace} -o wide",
       "kubectl describe pod {pod_name} -n {namespace}",
-      "kubectl logs {pod_name} -n {namespace}"
-    ]
+      "kubectl logs {pod_name} -n {namespace} -c {container_name}",
+      "kubectl logs {pod_name} -n {namespace} -c {container_name} --previous",
+      "kubectl get events -n {namespace} --field-selector involvedObject.name={pod_name}",
+      "kubectl get pod {pod_name} -n {namespace} -o yaml"
+    ],
+    "mitigation": "Work with developers to ensure correct configuration. Define sane default values for resource limits, probes, and application settings. Reference Kubernetes debugging documentation.",
+    "automation_safe": false,
+    "requires_investigation": true
   },
-  "resource_issues": {
-    "description": "Handle resource-related problems",
-    "triggers": ["cpu", "memory", "disk", "resource", "limit"],
+  "KubePodNotReady": {
+    "description": "Pod has been in a non-ready state for extended period. Either Running but failing readiness probe, or Pending unable to be scheduled.",
+    "triggers": ["pod not ready", "not ready", "pending", "readiness probe failed", "readiness probe failing"],
+    "meaning": "Pod exists but is not ready to serve traffic. Running state with failing readiness probe, or Pending state unable to schedule on any node.",
+    "impact": [
+      "Service degradation or unavailability",
+      "Pod not receiving traffic from Service",
+      "Load balancer excludes pod from rotation",
+      "Application capacity reduced"
+    ],
+    "diagnosis_steps": [
+      "Check pod status and phase using kubectl get pod command",
+      "Examine pod events for scheduling or runtime errors using kubectl describe pod command",
+      "Review pod logs for application startup issues using kubectl logs command",
+      "Verify readiness probe configuration (port, path, command, timing)",
+      "Check if liveness probe is killing the pod too quickly",
+      "Verify init containers have completed successfully",
+      "Check pod priority and scheduling constraints",
+      "Verify resource requests can be satisfied by available nodes",
+      "Look for node selector, affinity, or taint/toleration issues",
+      "Investigate if app is slow to start due to resource constraints",
+      "Check if app is waiting for dependent services",
+      "Verify all required resources exist (configmaps, secrets, volumes)",
+      "Check filesystem and permission issues",
+      "Verify security context and capabilities"
+    ],
     "actions": [
-      "Check resource utilization",
-      "Scale deployments if needed",
-      "Analyze resource requests vs limits"
-    ]
-  },
-  "performance_issues": {
-    "description": "Handle performance and scaling problems",
-    "triggers": ["latency", "slow", "timeout", "overload", "high cpu", "high memory", "response time", "scale", "replica"],
-    "actions": [
-      "Check current deployment replica count",
-      "Monitor resource utilization",
-      "Scale up replicas by 1 instance",
-      "Verify scaling operation success",
-      "Monitor performance after scaling"
+      "Use kubectl get pod to check current state and readiness",
+      "Use kubectl describe pod to see events and probe configuration",
+      "Use kubectl logs to check application startup logs",
+      "If readiness probe failing: verify probe endpoint/command is correct",
+      "If probe timing issue: increase initialDelaySeconds, periodSeconds, or timeoutSeconds",
+      "If pending: check node resources using kubectl describe nodes",
+      "If pending: verify pod can be scheduled (check taints, affinity, node selectors)",
+      "If resource issue: adjust requests/limits or add more nodes",
+      "If init container stuck: check init container logs",
+      "If dependency waiting: ensure dependent services are available",
+      "If configuration missing: verify all configmaps/secrets exist",
+      "Consult with developers for application-specific probe configuration"
     ],
     "kubernetes_commands": [
-      "kubectl get deployment nginx -n default",
-      "kubectl scale deployment nginx --replicas=2 -n default",
-      "kubectl get pods -n default -l app=nginx"
-    ]
+      "kubectl get pod {pod_name} -n {namespace} -o wide",
+      "kubectl describe pod {pod_name} -n {namespace}",
+      "kubectl logs {pod_name} -n {namespace} -c {container_name}",
+      "kubectl get events -n {namespace} --field-selector involvedObject.name={pod_name}",
+      "kubectl get pod {pod_name} -n {namespace} -o yaml",
+      "kubectl describe nodes"
+    ],
+    "mitigation": "Work with developers to configure appropriate readiness probes with correct timing. Ensure sufficient cluster resources for scheduling. Reference Kubernetes pod lifecycle documentation.",
+    "automation_safe": false,
+    "requires_investigation": true
   },
-  "network_issues": {
-    "description": "Handle networking problems",
-    "triggers": ["network", "connection", "timeout", "dns"],
+  "PerformanceIssues": {
+    "description": "Application experiencing performance degradation including high latency, slow response times, or resource constraints",
+    "triggers": ["latency", "slow", "timeout", "overload", "high cpu", "high memory", "response time", "performance", "degraded"],
+    "meaning": "Application is running but not performing optimally. May be caused by insufficient replicas, resource constraints, or increased load.",
+    "impact": [
+      "Slow response times affecting user experience",
+      "Request timeouts and failures",
+      "Reduced throughput and capacity",
+      "Potential service degradation"
+    ],
+    "diagnosis_steps": [
+      "Check current deployment replica count",
+      "Monitor resource utilization (CPU, memory) of pods",
+      "Check if pods are being throttled due to resource limits",
+      "Review application metrics and response times",
+      "Check if there's increased traffic or load",
+      "Verify no pods are in CrashLoop or Not Ready state",
+      "Check for resource contention on nodes"
+    ],
     "actions": [
-      "Check service endpoints",
-      "Verify network policies",
-      "Test connectivity between services"
-    ]
+      "Use kubectl get deployment to check current replica count in the namespace",
+      "Use kubectl top pods to monitor resource usage",
+      "Scale deployment by incrementing replicas by 1 using kubectl scale command",
+      "Verify scaling operation completed successfully",
+      "Monitor pod status after scaling to ensure new pods are Running and Ready",
+      "Check application metrics to confirm performance improvement",
+      "If still degraded: continue incrementing replicas or investigate resource limits"
+    ],
+    "kubernetes_commands": [
+      "kubectl get deployment {deployment_name} -n {namespace}",
+      "kubectl top pods -n {namespace} -l app={app_label}",
+      "kubectl get hpa -n {namespace}",
+      "kubectl scale deployment {deployment_name} --replicas={current_replicas + 1} -n {namespace}",
+      "kubectl get pods -n {namespace} -l app={app_label}",
+      "kubectl describe deployment {deployment_name} -n {namespace}"
+    ],
+    "mitigation": "Scale up replicas incrementally (by 1) to handle increased load. Consider implementing Horizontal Pod Autoscaler (HPA) for automatic scaling. Review and optimize resource requests/limits.",
+    "automation_safe": true,
+    "requires_investigation": false,
+    "scaling_strategy": "Increment replicas by 1 at a time and monitor. Wait for pods to be Ready before evaluating if additional scaling is needed."
+  },
+  "ResourceConstraints": {
+    "description": "Pods experiencing resource constraints such as CPU throttling, memory pressure, or approaching resource limits",
+    "triggers": ["cpu", "memory", "disk", "resource", "limit", "throttling", "oom", "out of memory", "resource exhausted"],
+    "meaning": "Pods are constrained by CPU or memory limits, causing performance issues or pod termination. May also indicate cluster-wide resource pressure.",
+    "impact": [
+      "Performance degradation due to CPU throttling",
+      "Pod termination due to OOMKilled (Out of Memory)",
+      "Unable to schedule new pods",
+      "Application instability"
+    ],
+    "diagnosis_steps": [
+      "Check pod resource utilization using kubectl top pods",
+      "Check node resource availability using kubectl top nodes",
+      "Review pod resource requests and limits",
+      "Check for OOMKilled events in pod history",
+      "Verify if pods are being evicted due to resource pressure",
+      "Check if CPU is being throttled",
+      "Review cluster-wide resource allocation"
+    ],
+    "actions": [
+      "Use kubectl top pods to see current resource usage in namespace",
+      "Use kubectl top nodes to check node capacity",
+      "Use kubectl describe pod to see resource requests, limits, and events",
+      "If memory OOMKilled: increase memory limits in pod spec",
+      "If CPU throttled: increase CPU limits or optimize application",
+      "If scheduling failures: add more nodes or reduce resource requests",
+      "If cluster pressure: review and optimize resource requests across workloads",
+      "Consider implementing resource quotas and limit ranges for better control"
+    ],
+    "kubernetes_commands": [
+      "kubectl top pods -n {namespace}",
+      "kubectl top nodes",
+      "kubectl describe pod {pod_name} -n {namespace}",
+      "kubectl get pods -n {namespace} -o json | jq '.items[] | {name: .metadata.name, resources: .spec.containers[].resources}'",
+      "kubectl describe nodes",
+      "kubectl get events -n {namespace} --field-selector reason=OOMKilled",
+      "kubectl get resourcequota -n {namespace}"
+    ],
+    "mitigation": "Adjust resource requests and limits based on actual usage patterns. Implement resource quotas and limit ranges. Consider cluster scaling if persistently resource-constrained.",
+    "automation_safe": false,
+    "requires_investigation": true
+  },
+  "NetworkIssues": {
+    "description": "Connectivity problems between pods, services, or external endpoints including DNS failures and network timeouts",
+    "triggers": ["network", "connection", "timeout", "dns", "connectivity", "unreachable", "connection refused", "service unavailable"],
+    "meaning": "Pods cannot communicate with required services or external endpoints. May be caused by network policies, DNS issues, or service misconfiguration.",
+    "impact": [
+      "Application cannot reach dependent services",
+      "External API calls failing",
+      "Inter-service communication broken",
+      "Complete application failure if critical dependencies unreachable"
+    ],
+    "diagnosis_steps": [
+      "Check service endpoints and selectors",
+      "Verify DNS resolution is working",
+      "Check network policies that may block traffic",
+      "Verify service port configuration",
+      "Test connectivity between pods",
+      "Check if target service pods are running and ready",
+      "Review application logs for connection errors",
+      "Verify ingress/egress rules"
+    ],
+    "actions": [
+      "Use kubectl get services to list services in namespace",
+      "Use kubectl get endpoints to verify service has backend pods",
+      "Use kubectl describe service to check selector and port configuration",
+      "Use kubectl get networkpolicies to review network restrictions",
+      "Use kubectl exec to test connectivity from within a pod (ping, curl, nslookup)",
+      "Verify DNS by resolving service names from within pods",
+      "Check if target service pods are Running and Ready",
+      "Review and adjust network policies if blocking legitimate traffic"
+    ],
+    "kubernetes_commands": [
+      "kubectl get services -n {namespace}",
+      "kubectl get endpoints -n {namespace}",
+      "kubectl describe service {service_name} -n {namespace}",
+      "kubectl get networkpolicies -n {namespace}",
+      "kubectl describe networkpolicy {policy_name} -n {namespace}",
+      "kubectl exec {pod_name} -n {namespace} -- nslookup {service_name}",
+      "kubectl exec {pod_name} -n {namespace} -- curl -v {service_name}:{port}",
+      "kubectl get pods -n {namespace} -l {service_selector}"
+    ],
+    "mitigation": "Verify service selectors match pod labels. Ensure network policies allow required traffic. Confirm DNS is functioning. Check that dependent services are healthy and ready.",
+    "automation_safe": false,
+    "requires_investigation": true
   }
 }
