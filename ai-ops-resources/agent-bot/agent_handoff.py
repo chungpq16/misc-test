@@ -154,58 +154,6 @@ class MockVectorDB:
         return None
 
 
-class MockTeamsWebhook:
-    """Mock Microsoft Teams webhook."""
-    
-    async def send_message(self, message: dict) -> bool:
-        """Simulate sending message to Teams."""
-        print("📢 [TEAMS NOTIFICATION]")
-        print(json.dumps(message, indent=2))
-        return True
-
-
-class RealTeamsWebhook:
-    """Real Microsoft Teams webhook implementation."""
-    
-    def __init__(self, webhook_url: str):
-        self.webhook_url = webhook_url
-    
-    async def send_message(self, message: dict) -> bool:
-        """Send message to Microsoft Teams via webhook."""
-        if not self.webhook_url:
-            print("⚠️  [TEAMS] No webhook URL configured, skipping notification")
-            return False
-        
-        try:
-            import httpx
-            
-            print(f"📢 [TEAMS] Sending notification to Teams...")
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    self.webhook_url,
-                    json=message,
-                    timeout=10.0
-                )
-                
-                if response.status_code == 200:
-                    print("✅ [TEAMS] Notification sent successfully")
-                    return True
-                else:
-                    print(f"❌ [TEAMS] Failed to send notification: {response.status_code}")
-                    print(f"❌ [TEAMS] Response: {response.text}")
-                    return False
-                    
-        except ImportError:
-            print("⚠️  [TEAMS] httpx not installed. Install with: pip install httpx")
-            print("📢 [TEAMS NOTIFICATION (Mock)]")
-            print(json.dumps(message, indent=2))
-            return False
-        except Exception as e:
-            print(f"❌ [TEAMS] Error sending notification: {e}")
-            return False
-
-
 class ActionTeamsWebhook:
     """Teams webhook specifically for Action Agent with green success cards."""
     
@@ -260,6 +208,8 @@ class ActionTeamsWebhook:
         try:
             import httpx
             print(f"📢 [ACTION AGENT TEAMS] Sending notification...")
+            print(f"📢 [ACTION AGENT TEAMS] Webhook URL: {self.webhook_url[:50]}...")
+            print(f"📢 [ACTION AGENT TEAMS] Message sections: {len(message.get('sections', []))}")
             
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -275,8 +225,14 @@ class ActionTeamsWebhook:
                     print(f"❌ [ACTION AGENT TEAMS] Failed: {response.status_code}")
                     print(f"❌ [ACTION AGENT TEAMS] Response: {response.text}")
                     return False
+        except ImportError:
+            print("⚠️  [ACTION AGENT TEAMS] httpx not installed. Install with: pip install httpx")
+            print("📢 [ACTION AGENT TEAMS] Mock notification (httpx missing)")
+            return False
         except Exception as e:
-            print(f"❌ [ACTION AGENT TEAMS] Error: {e}")
+            print(f"❌ [ACTION AGENT TEAMS] Error: {type(e).__name__}: {e}")
+            import traceback
+            print(f"❌ [ACTION AGENT TEAMS] Traceback: {traceback.format_exc()}")
             return False
 
 
@@ -346,6 +302,8 @@ class CommunicatorTeamsWebhook:
         try:
             import httpx
             print(f"📢 [COMMUNICATOR AGENT TEAMS] Sending notification...")
+            print(f"📢 [COMMUNICATOR AGENT TEAMS] Webhook URL: {self.webhook_url[:50]}...")
+            print(f"📢 [COMMUNICATOR AGENT TEAMS] Message sections: {len(message.get('sections', []))}")
             
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -361,8 +319,14 @@ class CommunicatorTeamsWebhook:
                     print(f"❌ [COMMUNICATOR AGENT TEAMS] Failed: {response.status_code}")
                     print(f"❌ [COMMUNICATOR AGENT TEAMS] Response: {response.text}")
                     return False
+        except ImportError:
+            print("⚠️  [COMMUNICATOR AGENT TEAMS] httpx not installed. Install with: pip install httpx")
+            print("📢 [COMMUNICATOR AGENT TEAMS] Mock notification (httpx missing)")
+            return False
         except Exception as e:
-            print(f"❌ [COMMUNICATOR AGENT TEAMS] Error: {e}")
+            print(f"❌ [COMMUNICATOR AGENT TEAMS] Error: {type(e).__name__}: {e}")
+            import traceback
+            print(f"❌ [COMMUNICATOR AGENT TEAMS] Traceback: {traceback.format_exc()}")
             return False
 
 
@@ -578,7 +542,9 @@ async def send_teams_notification(
     Returns:
         bool: True if notification was sent successfully
     """
-    print(f"📢 [ACTION AGENT] Sending Teams notification: {title}")
+    print(f"🔧 [ACTION AGENT TOOL] Tool called with title: {title}")
+    print(f"🔧 [ACTION AGENT TOOL] Actions taken: {len(actions_taken)} items")
+    print(f"🔧 [ACTION AGENT TOOL] Verification steps: {len(verification_steps)} items")
     
     success = await ctx.deps.send_action_notification(
         title=title,
@@ -588,6 +554,8 @@ async def send_teams_notification(
         after_state=after_state,
         verification_steps=verification_steps
     )
+    
+    print(f"🔧 [ACTION AGENT TOOL] Notification result: {success}")
     return success
 
 
@@ -617,7 +585,10 @@ async def send_teams_notification(
     Returns:
         bool: True if notification was sent successfully
     """
-    print(f"📢 [COMMUNICATOR AGENT] Sending Teams notification: {title}")
+    print(f"🔧 [COMMUNICATOR AGENT TOOL] Tool called with title: {title}")
+    print(f"🔧 [COMMUNICATOR AGENT TOOL] Severity: {severity}")
+    print(f"🔧 [COMMUNICATOR AGENT TOOL] Immediate actions: {len(immediate_actions)} items")
+    print(f"🔧 [COMMUNICATOR AGENT TOOL] Efficiency improvements: {len(efficiency_improvements)} items")
     
     success = await ctx.deps.send_escalation_notification(
         title=title,
@@ -627,6 +598,8 @@ async def send_teams_notification(
         immediate_actions=immediate_actions,
         efficiency_improvements=efficiency_improvements
     )
+    
+    print(f"🔧 [COMMUNICATOR AGENT TOOL] Notification result: {success}")
     return success
 
 
@@ -796,8 +769,18 @@ async def handle_incident(alert_message: str, shared_usage: RunUsage) -> dict:
                 )
                 
                 report = escalation_result.output
+                
+                # Check if the agent actually called the send_teams_notification tool
+                if not report.teams_notification_sent:
+                    print("⚠️  [COMMUNICATOR WARNING] Agent did not call send_teams_notification tool!")
+                    print("⚠️  [COMMUNICATOR WARNING] The LLM may have skipped the tool call.")
+                    print("⚠️  [COMMUNICATOR WARNING] Check if the tool is available and the prompt is clear.")
+                
             except Exception as e:
                 print(f"❌ [COMMUNICATOR ERROR] {e}")
+                import traceback
+                print(f"❌ [COMMUNICATOR ERROR] Full traceback:")
+                traceback.print_exc()
                 # Create a fallback report
                 report = EscalationReport(
                     summary=f"Failed to generate full analysis: {str(e)}",
