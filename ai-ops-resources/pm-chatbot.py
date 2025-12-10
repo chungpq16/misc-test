@@ -301,6 +301,109 @@ llm = ChatOllama(
 # Phase 2 – Text-to-SQL chain
 # -----------------------------
 
+# -----------------------------
+# Firewall Clearance Request Processing
+# -----------------------------
+
+def detect_firewall_request(question: str) -> dict:
+    """
+    Detect if the question is a firewall clearance request.
+    Returns dict with plant_name, use_case, environment or None.
+    """
+    import re
+    
+    question_lower = question.lower()
+    
+    # Pattern: firewall clearance for {plant}, use case {usecase}, environment {env}
+    if "firewall" in question_lower and "clearance" in question_lower:
+        result = {}
+        
+        # Extract plant name (after "for" and before "use case" or ",")
+        plant_match = re.search(r'for\s+([\w-]+)', question_lower)
+        if plant_match:
+            result['plant_name'] = plant_match.group(1).upper()
+        
+        # Extract use case
+        usecase_match = re.search(r'use\s*case\s+([\w-]+)', question_lower)
+        if usecase_match:
+            result['use_case'] = usecase_match.group(1).lower()
+        
+        # Extract environment
+        env_match = re.search(r'environment\s+([pqd])', question_lower)
+        if env_match:
+            result['environment'] = env_match.group(1).upper()
+        
+        if 'plant_name' in result and 'use_case' in result and 'environment' in result:
+            return result
+    
+    return None
+
+
+def process_firewall_request(
+    plant_name: str,
+    use_case: str,
+    environment: str,
+    df_env: pd.DataFrame,
+    df_lb: pd.DataFrame,
+    df_excel: pd.DataFrame,
+) -> dict:
+    """
+    Process firewall clearance request.
+    Returns dict with snat_ip, lb_ip (if opbase), cluster, project_name.
+    """
+    result = {'snat_ip': None, 'lb_ip': None, 'cluster': None, 'project_name': None}
+    
+    # Step 1: Lookup plant code in Excel
+    plant_code = None
+    if df_excel is not None and not df_excel.empty:
+        # Assume first column has format "code, name"
+        first_col = df_excel.columns[0]
+        for val in df_excel[first_col]:
+            if pd.notna(val) and plant_name in str(val).upper():
+                # Extract code (before comma)
+                parts = str(val).split(',')
+                if len(parts) >= 2:
+                    plant_code = parts[0].strip()
+                    break
+    
+    # Step 2: Search ENV table for project
+    if df_env is not None and not df_env.empty:
+        # Pattern: xxx-{plant_code|plant_name}-{use_case}-{environment}
+        for idx, row in df_env.iterrows():
+            project = str(row.get('Project', '')).lower()
+            
+            # Split project by dashes
+            parts = project.split('-')
+            if len(parts) >= 4:
+                # Check if matches pattern: *-{plant}-{usecase}-{env}
+                proj_plant = parts[-3]
+                proj_usecase = parts[-2]
+                proj_env = parts[-1]
+                
+                # Match plant (code preferred, then name)
+                plant_match = False
+                if plant_code and proj_plant == plant_code.lower():
+                    plant_match = True
+                elif proj_plant == plant_name.lower():
+                    plant_match = True
+                
+                # Match use case and environment
+                if plant_match and proj_usecase == use_case.lower() and proj_env == environment.lower():
+                    result['project_name'] = row.get('Project', '')
+                    result['snat_ip'] = row.get('SNAT-IP', '')
+                    result['cluster'] = row.get('Cluster', '')
+                    break
+    
+    # Step 3: If use_case is opbase, get LB IP from LB table
+    if use_case.lower() == 'opbase' and result['cluster'] and df_lb is not None and not df_lb.empty:
+        for idx, row in df_lb.iterrows():
+            if str(row.get('Cluster', '')).lower() == str(result['cluster']).lower():
+                result['lb_ip'] = row.get('LB-IP Address', '')
+                break
+    
+    return result
+
+
 SQL_SYSTEM_PROMPT = (
     "You are a senior data engineer that writes SQL for DuckDB.\n\n"
     "You are given schemas of tables: env_table (environment data), lb_table (loadbalancer data), and/or excel_table (Excel file data).\n"
@@ -417,15 +520,86 @@ def generate_answer_from_result(
 def text_to_sql_chain(question: str, df_env_raw: pd.DataFrame = None, df_lb_raw: pd.DataFrame = None, df_excel_raw: pd.DataFrame = None):
     """
     Full flow for Phase 2 over the combined dataframes:
-    1) Build SQL-friendly copies of dataframes.
-    2) LLM: question -> SQL.
-    3) Execute SQL on DuckDB.
-    4) LLM: (question + sql + result) -> final answer.
+    1) Check if it's a firewall clearance request
+    2) Build SQL-friendly copies of dataframes.
+    3) LLM: question -> SQL.
+    4) Execute SQL on DuckDB.
+    5) LLM: (question + sql + result) -> final answer.
     Returns (sql, result_df, final_answer).
     """
     if (df_env_raw is None or df_env_raw.empty) and (df_lb_raw is None or df_lb_raw.empty) and (df_excel_raw is None or df_excel_raw.empty):
         raise ValueError("No dataframes available; load data first.")
 
+    # Check if this is a firewall clearance request
+    fw_request = detect_firewall_request(question)
+    
+    if fw_request:
+        # Process firewall clearance request
+        fw_result = process_firewall_request(
+            fw_request['plant_name'],
+            fw_request['use_case'],
+            fw_request['environment'],
+            df_env_raw,
+            df_lb_raw,
+            df_excel_raw,
+        )
+        
+        # Build firewall clearance table
+        # For now, use placeholder destinations - in reality, these would come from user input or another source
+        destinations = [
+            {'ip': '10.11.12.13', 'protocol': 'TCP', 'port': '12345', 'remark': 'Mail server'},
+            {'ip': '13.14.15.16', 'protocol': 'TCP', 'port': '80', 'remark': 'Trust Center'},
+            {'ip': '1.2.3.4', 'protocol': 'TCP', 'port': '8011', 'remark': 'Oracle DB'},
+        ]
+        
+        rows = []
+        # Add SNAT-IP rows
+        if fw_result['snat_ip']:
+            for dest in destinations:
+                rows.append({
+                    'SOURCE': fw_result['snat_ip'],
+                    'DESTINATION': dest['ip'],
+                    'PROTOCOL': dest['protocol'],
+                    'PORT': dest['port'],
+                    'REMARK': dest['remark'],
+                })
+        
+        # Add LB-IP rows (only for opbase)
+        if fw_result['lb_ip']:
+            for dest in destinations:
+                rows.append({
+                    'SOURCE': fw_result['lb_ip'],
+                    'DESTINATION': dest['ip'],
+                    'PROTOCOL': dest['protocol'],
+                    'PORT': dest['port'],
+                    'REMARK': dest['remark'],
+                })
+        
+        result_df = pd.DataFrame(rows)
+        
+        # Generate answer
+        if not result_df.empty:
+            answer = (
+                f"Firewall clearance request for **{fw_request['plant_name']}**, "
+                f"use case **{fw_request['use_case']}**, environment **{fw_request['environment']}**\n\n"
+                f"**Project found:** {fw_result['project_name']}\n"
+                f"**SNAT-IP:** {fw_result['snat_ip']}\n"
+            )
+            if fw_result['lb_ip']:
+                answer += f"**LB-IP:** {fw_result['lb_ip']} (opbase use case)\n"
+            if fw_result['cluster']:
+                answer += f"**Cluster:** {fw_result['cluster']}\n"
+            
+            answer += "\n**Firewall rules generated below.**"
+        else:
+            answer = (
+                f"Could not find project matching: {fw_request['plant_name']}, "
+                f"{fw_request['use_case']}, {fw_request['environment']}"
+            )
+        
+        return "-- Firewall clearance request processed --", result_df, answer
+
+    # Regular SQL query flow
     # Build SQL-friendly dataframes
     df_env_sql = build_sql_dataframe(df_env_raw, "env") if df_env_raw is not None and not df_env_raw.empty else None
     df_lb_sql = build_sql_dataframe(df_lb_raw, "lb") if df_lb_raw is not None and not df_lb_raw.empty else None
@@ -659,7 +833,7 @@ Examples:
 - `Show all LoadBalancer entries for cluster si0dcs09` (LB table)
 - `What is the LB IP address for namespace bd-cros-comp02-d-ias-shared?` (LB table)
 - `Show all data from excel_table` (Excel table)
-- `Join data from ENV and Excel tables where cluster matches`
+- `I want to create firewall clearance for SzP, use case opbase, environment P` (Firewall request)
 """
     )
 
