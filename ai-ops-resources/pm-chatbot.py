@@ -395,18 +395,16 @@ def process_firewall_request(
                     break
     
     # Step 3: If use_case is opbase, get LB IP from LB table
-    # Search by project name pattern (either with plant code or plant name)
-    if use_case.lower() == 'opbase' and df_lb is not None and not df_lb.empty:
-        # Try to find matching project in LB table
+    # Search by exact project name match from ENV table
+    if use_case.lower() == 'opbase' and result['project_name'] and df_lb is not None and not df_lb.empty:
+        # Use the exact project name found in ENV table to search LB table
+        project_to_find = result['project_name'].lower()
+        
         for idx, row in df_lb.iterrows():
             lb_project = str(row.get('Project', '')).lower()
             
-            # Check if project matches pattern with plant code
-            if plant_code and f"-{plant_code.lower()}-{use_case.lower()}-{environment.lower()}" in lb_project:
-                result['lb_ip'] = row.get('LB-IP Address', '')
-                break
-            # Or matches pattern with plant name
-            elif f"-{plant_name.lower()}-{use_case.lower()}-{environment.lower()}" in lb_project:
+            # Exact match with the project found in ENV table
+            if lb_project == project_to_find:
                 result['lb_ip'] = row.get('LB-IP Address', '')
                 break
     
