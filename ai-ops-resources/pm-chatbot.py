@@ -458,12 +458,15 @@ def main():
 
     st.title("📄 Confluence Multi-Page Viewer + 🐤 DuckDB Text-to-SQL Chat")
 
+    # Check DEV_MODE
+    dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
+
     st.markdown(
         """
 **Phase 1 — Data Ingestion & Display**
 
 - Loads **Environment** tables (ENVPAGE_IDS) and **LoadBalancer** tables (LB_PAGE_IDS) from Confluence.  
-- Loads **Excel** file (EXCEL_FILE_PATH) from local filesystem.  
+- Loads **Excel** file (BWN.xlsx) from local filesystem.  
 - Cleans nested tables / links and keeps only key columns.  
 - Adds a `__source_page_id__` column to Confluence data.  
 - Caches the result for 5 minutes.  
@@ -475,6 +478,10 @@ def main():
 - LLM Call 2: question + result → natural language answer.
 """
     )
+
+    # Auto-load data on first run
+    if "data_loaded" not in st.session_state:
+        st.session_state["data_loaded"] = False
 
     st.sidebar.header("Confluence Settings")
 
@@ -510,43 +517,28 @@ def main():
     )
 
     st.sidebar.markdown("---")
-    st.sidebar.subheader("Excel File")
     
-    # Excel file path from .env or text input
-    default_excel_path = os.getenv("EXCEL_FILE_PATH", "")
-    excel_file_path = st.sidebar.text_input(
-        "Excel File Path",
-        value=default_excel_path,
-        help="Absolute path to .xlsx file. Can also be set via EXCEL_FILE_PATH in .env",
-    )
-    
-    if st.sidebar.button("Load Excel File"):
-        if not excel_file_path:
-            st.error("Please provide an Excel file path.")
-        elif not os.path.exists(excel_file_path):
-            st.error(f"File not found: {excel_file_path}")
-        else:
-            try:
-                with st.spinner("Loading Excel file..."):
+    # Auto-load data on startup
+    if not st.session_state["data_loaded"]:
+        with st.spinner("Auto-loading data on startup..."):
+            errors = []
+            
+            # Auto-load Excel file (BWN.xlsx)
+            excel_file_path = "BWN.xlsx"
+            if os.path.exists(excel_file_path):
+                try:
                     df_excel = load_excel_file(excel_file_path)
                     st.session_state["excel_df"] = df_excel
                     st.session_state["excel_file_path"] = excel_file_path
-                    st.success(f"✅ Loaded Excel file: {len(df_excel)} rows, {len(df_excel.columns)} columns")
-            except Exception as e:
-                st.error(f"Error loading Excel file: {e}")
-
-    st.sidebar.markdown("---")
-    if st.sidebar.button("Load / Refresh Tables from Confluence"):
-        if not token:
-            st.error("Please provide a Bearer token.")
-        elif not env_page_ids and not lb_page_ids:
-            st.error("No Page IDs found in .env (ENVPAGE_IDS or LB_PAGE_IDS). Please configure them.")
-        else:
-            errors = []
+                except Exception as e:
+                    errors.append(f"Excel file error: {e}")
+            else:
+                errors.append(f"Excel file not found: {excel_file_path}")
             
-            # Load Environment tables
-            if env_page_ids:
-                with st.spinner(f"Fetching Environment table(s) ({len(env_page_ids)} page(s))..."):
+            # Auto-load Confluence tables
+            if token and (env_page_ids or lb_page_ids):
+                # Load Environment tables
+                if env_page_ids:
                     try:
                         df_env = cached_load_tables_combined(
                             base_url,
@@ -556,13 +548,11 @@ def main():
                         )
                         st.session_state["confluence_env_df"] = df_env
                         st.session_state["env_page_ids"] = env_page_ids
-                        st.success(f"✅ Loaded {len(env_page_ids)} ENV page(s), {len(df_env)} rows")
                     except Exception as e:
                         errors.append(f"ENV tables error: {e}")
-            
-            # Load LoadBalancer tables
-            if lb_page_ids:
-                with st.spinner(f"Fetching LoadBalancer table(s) ({len(lb_page_ids)} page(s))..."):
+                
+                # Load LoadBalancer tables
+                if lb_page_ids:
                     try:
                         df_lb = cached_load_tables_combined(
                             base_url,
@@ -572,13 +562,21 @@ def main():
                         )
                         st.session_state["confluence_lb_df"] = df_lb
                         st.session_state["lb_page_ids"] = lb_page_ids
-                        st.success(f"✅ Loaded {len(lb_page_ids)} LB page(s), {len(df_lb)} rows")
                     except Exception as e:
                         errors.append(f"LB tables error: {e}")
             
+            st.session_state["data_loaded"] = True
+            
             if errors:
                 for err in errors:
-                    st.error(err)
+                    st.sidebar.warning(err)
+            else:
+                st.sidebar.success("✅ All data loaded successfully!")
+    
+    # Manual refresh button
+    if st.sidebar.button("🔄 Refresh All Data"):
+        st.session_state["data_loaded"] = False
+        st.rerun()
 
     df_env = st.session_state.get("confluence_env_df")
     df_lb = st.session_state.get("confluence_lb_df")
@@ -587,51 +585,67 @@ def main():
     loaded_lb_page_ids = st.session_state.get("lb_page_ids", [])
     excel_file_path = st.session_state.get("excel_file_path", "")
 
-    # Phase 1 – Display tables
-    if df_env is not None:
-        st.subheader("Environment Table (from Confluence)")
-        if loaded_env_page_ids:
-            st.caption(f"Source page IDs: {', '.join(loaded_env_page_ids)}")
-        st.dataframe(df_env, use_container_width=True)
+    # Phase 1 – Display tables (only in DEV_MODE)
+    if dev_mode:
+        st.subheader("📊 Data Tables (DEV_MODE=true)")
+        
+        if df_env is not None:
+            with st.expander("Environment Table (from Confluence)", expanded=False):
+                if loaded_env_page_ids:
+                    st.caption(f"Source page IDs: {', '.join(loaded_env_page_ids)}")
+                st.dataframe(df_env, use_container_width=True)
 
-        csv_data = df_env.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="⬇️ Download ENV as CSV",
-            data=csv_data,
-            file_name="confluence_env_table.csv",
-            mime="text/csv",
-        )
-    
-    if df_lb is not None:
-        st.subheader("LoadBalancer Table (from Confluence)")
-        if loaded_lb_page_ids:
-            st.caption(f"Source page IDs: {', '.join(loaded_lb_page_ids)}")
-        st.dataframe(df_lb, use_container_width=True)
+                csv_data = df_env.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="⬇️ Download ENV as CSV",
+                    data=csv_data,
+                    file_name="confluence_env_table.csv",
+                    mime="text/csv",
+                )
+        
+        if df_lb is not None:
+            with st.expander("LoadBalancer Table (from Confluence)", expanded=False):
+                if loaded_lb_page_ids:
+                    st.caption(f"Source page IDs: {', '.join(loaded_lb_page_ids)}")
+                st.dataframe(df_lb, use_container_width=True)
 
-        csv_data = df_lb.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="⬇️ Download LB as CSV",
-            data=csv_data,
-            file_name="confluence_lb_table.csv",
-            mime="text/csv",
-        )
-    
-    if df_excel is not None:
-        st.subheader("Excel Table (from local file)")
-        if excel_file_path:
-            st.caption(f"Source file: {excel_file_path}")
-        st.dataframe(df_excel, use_container_width=True)
+                csv_data = df_lb.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="⬇️ Download LB as CSV",
+                    data=csv_data,
+                    file_name="confluence_lb_table.csv",
+                    mime="text/csv",
+                )
+        
+        if df_excel is not None:
+            with st.expander("Excel Table (BWN.xlsx)", expanded=False):
+                if excel_file_path:
+                    st.caption(f"Source file: {excel_file_path}")
+                st.dataframe(df_excel, use_container_width=True)
 
-        csv_data = df_excel.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="⬇️ Download Excel as CSV",
-            data=csv_data,
-            file_name="excel_table.csv",
-            mime="text/csv",
-        )
-    
-    if df_env is None and df_lb is None and df_excel is None:
-        st.info("Load tables from Confluence or Excel file using the sidebar buttons.")
+                csv_data = df_excel.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="⬇️ Download Excel as CSV",
+                    data=csv_data,
+                    file_name="excel_table.csv",
+                    mime="text/csv",
+                )
+        
+        if df_env is None and df_lb is None and df_excel is None:
+            st.info("No data loaded yet. Check sidebar for loading status.")
+    else:
+        # Production mode - just show status
+        if df_env is not None or df_lb is not None or df_excel is not None:
+            tables_loaded = []
+            if df_env is not None:
+                tables_loaded.append(f"ENV ({len(df_env)} rows)")
+            if df_lb is not None:
+                tables_loaded.append(f"LB ({len(df_lb)} rows)")
+            if df_excel is not None:
+                tables_loaded.append(f"Excel ({len(df_excel)} rows)")
+            st.info(f"✅ Data loaded: {', '.join(tables_loaded)}. Ask questions below!")
+        else:
+            st.warning("⚠️ No data loaded. Check sidebar configuration.")
 
     # Phase 2 – Text-to-SQL Chat
     st.markdown("---")
