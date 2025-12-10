@@ -188,6 +188,19 @@ def cached_load_tables_combined(
 
 
 # -----------------------------
+# Excel file loading
+# -----------------------------
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_excel_file(file_path: str) -> pd.DataFrame:
+    """
+    Load an Excel file and return as DataFrame.
+    """
+    df = pd.read_excel(file_path)
+    return df
+
+
+# -----------------------------
 # DuckDB setup (in-memory)
 # -----------------------------
 
@@ -214,18 +227,35 @@ COL_MAP_LB = {
     "Status": "status",
 }
 
+# Excel table - will use columns as-is, converting to snake_case
+def excel_columns_to_sql(df: pd.DataFrame) -> dict:
+    """
+    Convert Excel column names to SQL-friendly names (snake_case).
+    """
+    col_map = {}
+    for col in df.columns:
+        # Convert to lowercase and replace spaces/special chars with underscore
+        sql_name = col.strip().lower().replace(" ", "_").replace("-", "_").replace(":", "_")
+        # Remove any duplicate underscores
+        sql_name = "_".join(filter(None, sql_name.split("_")))
+        col_map[col] = sql_name
+    return col_map
+
 
 def build_sql_dataframe(df_raw: pd.DataFrame, table_type: str = "env") -> pd.DataFrame:
     """
     Return a copy of df_raw with columns renamed to SQL-friendly names
     based on COL_MAP and restricted to those columns.
     Keeps '__source_page_id__' if present (useful for debugging).
-    table_type: "env" or "lb"
+    table_type: "env", "lb", or "excel"
     """
-    COL_MAP = COL_MAP_LB if table_type == "lb" else COL_MAP_ENV
-    
-    cols_present = [c for c in COL_MAP.keys() if c in df_raw.columns]
-    df_sql = df_raw[cols_present].rename(columns=COL_MAP).copy()
+    if table_type == "excel":
+        COL_MAP = excel_columns_to_sql(df_raw)
+        df_sql = df_raw.rename(columns=COL_MAP).copy()
+    else:
+        COL_MAP = COL_MAP_LB if table_type == "lb" else COL_MAP_ENV
+        cols_present = [c for c in COL_MAP.keys() if c in df_raw.columns]
+        df_sql = df_raw[cols_present].rename(columns=COL_MAP).copy()
 
     # optionally keep source page information
     if "__source_page_id__" in df_raw.columns:
@@ -234,10 +264,10 @@ def build_sql_dataframe(df_raw: pd.DataFrame, table_type: str = "env") -> pd.Dat
     return df_sql
 
 
-def execute_sql_on_df(df_env: pd.DataFrame = None, df_lb: pd.DataFrame = None, sql: str = "") -> pd.DataFrame:
+def execute_sql_on_df(df_env: pd.DataFrame = None, df_lb: pd.DataFrame = None, df_excel: pd.DataFrame = None, sql: str = "") -> pd.DataFrame:
     """
     Execute a SQL query against dataframes using DuckDB in-memory.
-    The tables are registered as 'env_table' and 'lb_table'.
+    The tables are registered as 'env_table', 'lb_table', and 'excel_table'.
     """
     con = duckdb.connect(database=":memory:")
     try:
@@ -245,6 +275,8 @@ def execute_sql_on_df(df_env: pd.DataFrame = None, df_lb: pd.DataFrame = None, s
             con.register("env_table", df_env)
         if df_lb is not None:
             con.register("lb_table", df_lb)
+        if df_excel is not None:
+            con.register("excel_table", df_excel)
         result_df = con.execute(sql).df()
     finally:
         con.close()
@@ -271,10 +303,10 @@ llm = ChatOllama(
 
 SQL_SYSTEM_PROMPT = (
     "You are a senior data engineer that writes SQL for DuckDB.\n\n"
-    "You are given schemas of tables: env_table (environment data) and/or lb_table (loadbalancer data).\n"
+    "You are given schemas of tables: env_table (environment data), lb_table (loadbalancer data), and/or excel_table (Excel file data).\n"
     "Your job is to translate the user's natural language question into a single SQL query.\n\n"
     "Rules:\n"
-    "- Query the appropriate table(s): env_table and/or lb_table.\n"
+    "- Query the appropriate table(s): env_table, lb_table, and/or excel_table.\n"
     "- Only use the columns provided in the schema.\n"
     "- Use ILIKE or LOWER() for case-insensitive matching on text when appropriate.\n"
     "- Do NOT use backticks. Use standard SQL (DuckDB).\n"
@@ -283,7 +315,7 @@ SQL_SYSTEM_PROMPT = (
 )
 
 
-def generate_sql_from_question(question: str, df_env_sql: pd.DataFrame = None, df_lb_sql: pd.DataFrame = None) -> str:
+def generate_sql_from_question(question: str, df_env_sql: pd.DataFrame = None, df_lb_sql: pd.DataFrame = None, df_excel_sql: pd.DataFrame = None) -> str:
     """
     LLM Call 1: Given the question and schemas, generate a SQL query string.
     """
@@ -305,6 +337,14 @@ def generate_sql_from_question(question: str, df_env_sql: pd.DataFrame = None, d
             lb_schema_lines.append(f"  - {col} ({dtype})")
         lb_schema_str = "\n".join(lb_schema_lines)
         schema_parts.append(f"Table: lb_table\nColumns:\n{lb_schema_str}")
+    
+    if df_excel_sql is not None:
+        excel_schema_lines = []
+        for col in df_excel_sql.columns:
+            dtype = str(df_excel_sql[col].dtype)
+            excel_schema_lines.append(f"  - {col} ({dtype})")
+        excel_schema_str = "\n".join(excel_schema_lines)
+        schema_parts.append(f"Table: excel_table\nColumns:\n{excel_schema_str}")
     
     schema_str = "\n\n".join(schema_parts)
 
@@ -374,7 +414,7 @@ def generate_answer_from_result(
     return resp.content.strip()
 
 
-def text_to_sql_chain(question: str, df_env_raw: pd.DataFrame = None, df_lb_raw: pd.DataFrame = None):
+def text_to_sql_chain(question: str, df_env_raw: pd.DataFrame = None, df_lb_raw: pd.DataFrame = None, df_excel_raw: pd.DataFrame = None):
     """
     Full flow for Phase 2 over the combined dataframes:
     1) Build SQL-friendly copies of dataframes.
@@ -383,19 +423,20 @@ def text_to_sql_chain(question: str, df_env_raw: pd.DataFrame = None, df_lb_raw:
     4) LLM: (question + sql + result) -> final answer.
     Returns (sql, result_df, final_answer).
     """
-    if (df_env_raw is None or df_env_raw.empty) and (df_lb_raw is None or df_lb_raw.empty):
-        raise ValueError("No dataframes available; load Confluence tables first.")
+    if (df_env_raw is None or df_env_raw.empty) and (df_lb_raw is None or df_lb_raw.empty) and (df_excel_raw is None or df_excel_raw.empty):
+        raise ValueError("No dataframes available; load data first.")
 
     # Build SQL-friendly dataframes
     df_env_sql = build_sql_dataframe(df_env_raw, "env") if df_env_raw is not None and not df_env_raw.empty else None
     df_lb_sql = build_sql_dataframe(df_lb_raw, "lb") if df_lb_raw is not None and not df_lb_raw.empty else None
+    df_excel_sql = build_sql_dataframe(df_excel_raw, "excel") if df_excel_raw is not None and not df_excel_raw.empty else None
 
     # Step 1: LLM generates SQL
-    sql = generate_sql_from_question(question, df_env_sql, df_lb_sql)
+    sql = generate_sql_from_question(question, df_env_sql, df_lb_sql, df_excel_sql)
 
     # Step 2: Execute SQL
     try:
-        result_df = execute_sql_on_df(df_env_sql, df_lb_sql, sql)
+        result_df = execute_sql_on_df(df_env_sql, df_lb_sql, df_excel_sql, sql)
     except Exception as e:
         raise RuntimeError(f"SQL execution error: {e}\nSQL: {sql}") from e
 
@@ -422,14 +463,15 @@ def main():
 **Phase 1 — Data Ingestion & Display**
 
 - Loads **Environment** tables (ENVPAGE_IDS) and **LoadBalancer** tables (LB_PAGE_IDS) from Confluence.  
+- Loads **Excel** file (EXCEL_FILE_PATH) from local filesystem.  
 - Cleans nested tables / links and keeps only key columns.  
-- Adds a `__source_page_id__` column to each row.  
-- Caches the combined result for 5 minutes.  
+- Adds a `__source_page_id__` column to Confluence data.  
+- Caches the result for 5 minutes.  
 
 **Phase 2 — Text-to-SQL Chat Chain**
 
-- LLM Call 1: question → SQL over `env_table` and/or `lb_table` (DuckDB).  
-- Execute SQL against in-memory DuckDB (both tables available).  
+- LLM Call 1: question → SQL over `env_table`, `lb_table`, and/or `excel_table` (DuckDB).  
+- Execute SQL against in-memory DuckDB (all tables available).  
 - LLM Call 2: question + result → natural language answer.
 """
     )
@@ -466,6 +508,32 @@ def main():
         type="password",
         help="Value also taken from CONFLUENCE_TOKEN and CONFLUENCE_PAGE_IDS in .env if set.",
     )
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Excel File")
+    
+    # Excel file path from .env or text input
+    default_excel_path = os.getenv("EXCEL_FILE_PATH", "")
+    excel_file_path = st.sidebar.text_input(
+        "Excel File Path",
+        value=default_excel_path,
+        help="Absolute path to .xlsx file. Can also be set via EXCEL_FILE_PATH in .env",
+    )
+    
+    if st.sidebar.button("Load Excel File"):
+        if not excel_file_path:
+            st.error("Please provide an Excel file path.")
+        elif not os.path.exists(excel_file_path):
+            st.error(f"File not found: {excel_file_path}")
+        else:
+            try:
+                with st.spinner("Loading Excel file..."):
+                    df_excel = load_excel_file(excel_file_path)
+                    st.session_state["excel_df"] = df_excel
+                    st.session_state["excel_file_path"] = excel_file_path
+                    st.success(f"✅ Loaded Excel file: {len(df_excel)} rows, {len(df_excel.columns)} columns")
+            except Exception as e:
+                st.error(f"Error loading Excel file: {e}")
 
     st.sidebar.markdown("---")
     if st.sidebar.button("Load / Refresh Tables from Confluence"):
@@ -514,8 +582,10 @@ def main():
 
     df_env = st.session_state.get("confluence_env_df")
     df_lb = st.session_state.get("confluence_lb_df")
+    df_excel = st.session_state.get("excel_df")
     loaded_env_page_ids = st.session_state.get("env_page_ids", [])
     loaded_lb_page_ids = st.session_state.get("lb_page_ids", [])
+    excel_file_path = st.session_state.get("excel_file_path", "")
 
     # Phase 1 – Display tables
     if df_env is not None:
@@ -546,8 +616,22 @@ def main():
             mime="text/csv",
         )
     
-    if df_env is None and df_lb is None:
-        st.info("Load tables from Confluence first using the sidebar button.")
+    if df_excel is not None:
+        st.subheader("Excel Table (from local file)")
+        if excel_file_path:
+            st.caption(f"Source file: {excel_file_path}")
+        st.dataframe(df_excel, use_container_width=True)
+
+        csv_data = df_excel.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="⬇️ Download Excel as CSV",
+            data=csv_data,
+            file_name="excel_table.csv",
+            mime="text/csv",
+        )
+    
+    if df_env is None and df_lb is None and df_excel is None:
+        st.info("Load tables from Confluence or Excel file using the sidebar buttons.")
 
     # Phase 2 – Text-to-SQL Chat
     st.markdown("---")
@@ -560,7 +644,8 @@ Examples:
 - `List all projects and SNAT IPs where customer is PS` (ENV table)
 - `Show all LoadBalancer entries for cluster si0dcs09` (LB table)
 - `What is the LB IP address for namespace bd-cros-comp02-d-ias-shared?` (LB table)
-- `Show all projects from both ENV and LB tables`
+- `Show all data from excel_table` (Excel table)
+- `Join data from ENV and Excel tables where cluster matches`
 """
     )
 
@@ -570,17 +655,17 @@ Examples:
         with st.chat_message("user"):
             st.markdown(user_q)
 
-        if df_env is None and df_lb is None:
+        if df_env is None and df_lb is None and df_excel is None:
             with st.chat_message("assistant"):
                 st.markdown(
                     "I don't have any data yet. "
-                    "Please load the Confluence tables first."
+                    "Please load tables from Confluence or Excel file first."
                 )
         else:
             with st.chat_message("assistant"):
                 try:
                     with st.spinner("Running Text-to-SQL chain (2 LLM calls + DuckDB)..."):
-                        sql, result_df, answer = text_to_sql_chain(user_q, df_env, df_lb)
+                        sql, result_df, answer = text_to_sql_chain(user_q, df_env, df_lb, df_excel)
 
                     # Final answer
                     st.markdown(f"**Answer:**\n\n{answer}")
