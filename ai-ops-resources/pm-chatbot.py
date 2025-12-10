@@ -359,12 +359,23 @@ def process_firewall_request(
         # Assume first column has format "code, name"
         first_col = df_excel.columns[0]
         for val in df_excel[first_col]:
-            if pd.notna(val) and plant_name in str(val).upper():
-                # Extract code (before comma)
-                parts = str(val).split(',')
-                if len(parts) >= 2:
-                    plant_code = parts[0].strip()
-                    break
+            if pd.notna(val):
+                val_str = str(val).upper()
+                plant_name_upper = plant_name.upper()
+                
+                # Check if plant_name is contained in the cell value (after comma)
+                # Format: "code, name" -> extract name part and check for partial match
+                if ',' in val_str:
+                    parts = val_str.split(',')
+                    if len(parts) >= 2:
+                        code_part = parts[0].strip()
+                        name_part = parts[1].strip()
+                        
+                        # Check if plant_name matches the beginning of name_part
+                        # e.g., "BUE" matches "BUEP"
+                        if name_part.startswith(plant_name_upper) or plant_name_upper in name_part:
+                            plant_code = code_part
+                            break
     
     # Step 2: Search ENV table for project
     if df_env is not None and not df_env.empty:
