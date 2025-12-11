@@ -6,6 +6,7 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.ag_ui import StateDeps
 from ag_ui.core import EventType, StateSnapshotEvent
 from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIChatModel
+from pydantic_ai.models.ollama import OllamaModel
 from pydantic_ai.providers.ollama import OllamaProvider
 
 # load environment variables
@@ -22,20 +23,17 @@ def get_model():
     use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
     
     if use_ollama:
-        # Ollama configuration
-        # For OllamaProvider with OpenAI-compatible endpoint, base_url must include /v1
+        # Ollama configuration - using native OllamaModel for better tool calling support
         base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        # Ensure base_url ends with /v1 for OpenAI compatibility
-        if not base_url.endswith('/v1'):
-            base_url = f"{base_url}/v1"
+        # Remove /v1 suffix if present - native Ollama doesn't use it
+        base_url = base_url.rstrip('/v1').rstrip('/')
         
         model_name = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
-        api_key = os.getenv("OLLAMA_API_KEY", "not-required")  # Ollama local doesn't need API key
         
-        print(f"🦙 Using Ollama model: {model_name} at {base_url}")
-        return OpenAIChatModel(
+        print(f"🦙 Using Ollama native model: {model_name} at {base_url}")
+        return OllamaModel(
             model_name=model_name,
-            provider=OllamaProvider(base_url=base_url, api_key=api_key),
+            base_url=base_url,
         )
     else:
         # OpenAI configuration (default)
