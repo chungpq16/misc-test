@@ -7,6 +7,32 @@ __pycache__/
 *.so
 .Python
 *.egg-info/
+venv/
+.venv/
+*.pyc
+*.pyo
+dist/
+uv.lock
+.python-version
+
+# Node.js
+node_modules/
+.next/
+.pnp/
+.pnp.*
+out/
+build/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lockb
+*.tsbuildinfo
+next-env.d.ts
+
+# Environment variables
+.env
+.env.*
+!.env.example
 
 # IDEs
 .vscode/
@@ -14,3 +40,16 @@ __pycache__/
 
 # OS
 .DS_Store
+*.pem
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Testing
+coverage/
+
+# Vercel
+.vercel
