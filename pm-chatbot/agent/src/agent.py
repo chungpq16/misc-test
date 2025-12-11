@@ -23,7 +23,7 @@ def get_model():
     
     if use_ollama:
         # Ollama configuration
-        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         model_name = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
         api_key = os.getenv("OLLAMA_API_KEY", "not-required")  # Ollama local doesn't need API key
         
