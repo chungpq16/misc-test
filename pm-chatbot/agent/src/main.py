@@ -125,19 +125,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Mount CopilotKit agent endpoint
-app.include_router(
-    agent.to_ag_ui(
-        deps=lambda: StateDeps(
-            state=AgentState(
-                env_data_loaded=data_context.env_data_loaded if data_context else False,
-                lb_data_loaded=data_context.lb_data_loaded if data_context else False,
-                excel_data_loaded=data_context.excel_data_loaded if data_context else False,
-            ),
-            deps=data_context
-        )
-    ),
-    prefix="/api/copilotkit"
-)
+# to_ag_ui returns an AGUIApp, we need to mount it properly
+ag_ui_app = agent.to_ag_ui(deps=lambda: data_context)
+app.mount("/api/copilotkit", ag_ui_app)
 
 
 if __name__ == "__main__":
