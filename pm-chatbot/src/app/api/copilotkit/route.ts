@@ -14,8 +14,8 @@ const serviceAdapter = new ExperimentalEmptyAdapter();
 //    integration to setup the connection.
 const runtime = new CopilotRuntime({
   agents: {
-    // Our FastAPI endpoint URL
-    my_agent: new HttpAgent({ url: "http://localhost:8000/" }),
+    // Our FastAPI endpoint URL - connects to PydanticAI backend
+    my_agent: new HttpAgent({ url: "http://localhost:8000/api/copilotkit" }),
   },
 });
 
