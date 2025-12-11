@@ -35,7 +35,7 @@ def get_model():
         print(f"🦙 Using Ollama model: {model_name} at {base_url}")
         return OpenAIChatModel(
             model_name=model_name,
-            provider=OllamaProvider(base_url=base_url, api_key=api_key)
+            provider=OllamaProvider(base_url=base_url, api_key=api_key),
         )
     else:
         # OpenAI configuration (default)
@@ -73,6 +73,7 @@ class AgentState(BaseModel):
 agent = Agent(
   model = get_model(),
   deps_type=PMDataContext,
+  retries=2,
   system_prompt=dedent("""
     You are a helpful PM (Project Management) assistant with access to project databases.
     
@@ -81,15 +82,27 @@ agent = Agent(
     - lb_table: Load balancer configurations (LB-IP addresses, ports, namespaces)
     - excel_table: Plant codes and names mapping
     
-    Use the available tools to help users with:
-    1. Project information queries (SNAT IPs, clusters, customers, etc.)
-    2. Load balancer information
-    3. Firewall clearance generation
+    CRITICAL INSTRUCTIONS FOR TOOL USE:
     
-    For regular queries, use the query_database tool to execute SQL.
-    For firewall clearance requests, use the generate_firewall_rules tool.
+    1. When user asks for project information (SNAT IP, cluster, customer, etc):
+       - IMMEDIATELY use the query_database tool with appropriate SQL
+       - DO NOT ask the user to provide SQL
+       - DO NOT just suggest SQL - EXECUTE it using the tool
+       - Example: "SELECT * FROM env_table WHERE project LIKE '%PS-FEP-IES-Q%'"
     
-    Be concise and helpful. Format answers clearly with key information highlighted.
+    2. When user asks for firewall clearance:
+       - Use the generate_firewall_rules tool
+       - Provide the plant_name, use_case, and environment parameters
+    
+    3. For quick project lookups:
+       - Use the search_project_info tool
+       - You can search by project_name, customer, or cluster
+    
+    IMPORTANT: 
+    - ALWAYS use tools to fetch data - NEVER ask the user to write SQL
+    - Execute queries immediately when asked for information
+    - Provide clear, formatted responses with the data from tool results
+    - Format your answers in a user-friendly way with proper explanations
   """).strip()
 )
 
@@ -105,13 +118,22 @@ async def query_database(
     """
     Execute a SQL query against the DuckDB tables (env_table, lb_table, excel_table).
     
-    Use this tool to query project information, load balancer configs, or plant codes.
+    USE THIS TOOL to query project information. DO NOT just suggest SQL - EXECUTE it.
+    
+    Available tables:
+    - env_table: Contains project, customer, cluster, snat_ip, security_zone, etc.
+    - lb_table: Contains lb_ip, port, namespace, etc.
+    - excel_table: Contains plant codes and names
     
     Args:
         sql_query: The SQL query to execute (use DuckDB syntax)
     
     Returns:
         Dictionary with 'rows' (list of dicts), 'count', 'columns', or 'error'
+        
+    Example usage:
+        - To find SNAT IP: "SELECT * FROM env_table WHERE project LIKE '%project_name%'"
+        - To list projects: "SELECT DISTINCT project FROM env_table LIMIT 10"
     """
     try:
         result_df = ctx.deps.db_connection.execute(sql_query).df()
