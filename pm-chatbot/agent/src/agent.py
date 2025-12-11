@@ -67,7 +67,7 @@ class AgentState(BaseModel):
 # =====
 agent = Agent(
   model = get_model(),
-  deps_type=StateDeps[AgentState, PMDataContext],
+  deps_type=PMDataContext,
   system_prompt=dedent("""
     You are a helpful PM (Project Management) assistant with access to project databases.
     
@@ -94,7 +94,7 @@ agent = Agent(
 
 @agent.tool
 async def query_database(
-    ctx: RunContext[StateDeps[AgentState, PMDataContext]],
+    ctx: RunContext[PMDataContext],
     sql_query: str
 ) -> dict:
     """
@@ -109,11 +109,7 @@ async def query_database(
         Dictionary with 'rows' (list of dicts), 'count', 'columns', or 'error'
     """
     try:
-        result_df = ctx.deps.deps.db_connection.execute(sql_query).df()
-        
-        # Update state
-        ctx.deps.state.last_sql_query = sql_query
-        ctx.deps.state.last_result_count = len(result_df)
+        result_df = ctx.deps.db_connection.execute(sql_query).df()
         
         return {
             "rows": result_df.to_dict(orient="records"),
@@ -132,7 +128,7 @@ async def query_database(
 
 @agent.tool
 async def generate_firewall_rules(
-    ctx: RunContext[StateDeps[AgentState, PMDataContext]],
+    ctx: RunContext[PMDataContext],
     plant_name: str,
     use_case: str,
     environment: str,
@@ -153,9 +149,9 @@ async def generate_firewall_rules(
         Dictionary with firewall rules and project information
     """
     # Get data from context
-    df_env = ctx.deps.deps.df_env
-    df_lb = ctx.deps.deps.df_lb
-    df_excel = ctx.deps.deps.df_excel
+    df_env = ctx.deps.df_env
+    df_lb = ctx.deps.df_lb
+    df_excel = ctx.deps.df_excel
     
     # Process firewall request using utility function
     fw_result = process_firewall_request(
@@ -197,13 +193,6 @@ async def generate_firewall_rules(
                 'REMARK': dest['remark'],
             })
     
-    # Update state
-    ctx.deps.state.current_firewall_request = {
-        'plant_name': plant_name,
-        'use_case': use_case,
-        'environment': environment
-    }
-    
     return {
         "project_name": fw_result['project_name'],
         "snat_ip": fw_result['snat_ip'],
@@ -217,7 +206,7 @@ async def generate_firewall_rules(
 
 @agent.tool
 async def search_project_info(
-    ctx: RunContext[StateDeps[AgentState, PMDataContext]],
+    ctx: RunContext[PMDataContext],
     project_name: Optional[str] = None,
     customer: Optional[str] = None,
     cluster: Optional[str] = None
@@ -247,11 +236,7 @@ async def search_project_info(
     sql = f"SELECT * FROM env_table WHERE {where_clause} LIMIT 50"
     
     try:
-        result_df = ctx.deps.deps.db_connection.execute(sql).df()
-        
-        # Update state
-        ctx.deps.state.last_sql_query = sql
-        ctx.deps.state.last_result_count = len(result_df)
+        result_df = ctx.deps.db_connection.execute(sql).df()
         
         return {
             "projects": result_df.to_dict(orient="records"),

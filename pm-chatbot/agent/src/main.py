@@ -5,8 +5,7 @@ import duckdb
 import pandas as pd
 from fastapi import FastAPI
 
-from agent import AgentState, agent
-from pydantic_ai.ag_ui import StateDeps
+from agent import agent
 from data_context import PMDataContext
 from utils import load_confluence_tables_combined, build_sql_dataframe
 
@@ -127,16 +126,7 @@ app = FastAPI(lifespan=lifespan)
 
 # Mount CopilotKit agent endpoint
 # to_ag_ui returns an AGUIApp, we need to mount it properly
-ag_ui_app = agent.to_ag_ui(
-    deps=lambda: StateDeps(
-        state=AgentState(
-            env_data_loaded=data_context.env_data_loaded if data_context else False,
-            lb_data_loaded=data_context.lb_data_loaded if data_context else False,
-            excel_data_loaded=data_context.excel_data_loaded if data_context else False,
-        ),
-        deps=data_context
-    )
-)
+ag_ui_app = agent.to_ag_ui(deps=lambda: data_context)
 app.mount("/api/copilotkit", ag_ui_app)
 
 
