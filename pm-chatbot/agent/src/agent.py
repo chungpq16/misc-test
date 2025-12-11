@@ -23,7 +23,12 @@ def get_model():
     
     if use_ollama:
         # Ollama configuration
+        # For OllamaProvider with OpenAI-compatible endpoint, base_url must include /v1
         base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        # Ensure base_url ends with /v1 for OpenAI compatibility
+        if not base_url.endswith('/v1'):
+            base_url = f"{base_url}/v1"
+        
         model_name = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
         api_key = os.getenv("OLLAMA_API_KEY", "not-required")  # Ollama local doesn't need API key
         
